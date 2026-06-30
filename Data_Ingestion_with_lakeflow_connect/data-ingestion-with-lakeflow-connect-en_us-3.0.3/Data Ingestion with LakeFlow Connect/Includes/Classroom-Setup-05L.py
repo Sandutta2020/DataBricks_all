@@ -4,7 +4,7 @@
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC USE CATALOG dbacademy;
+# MAGIC USE CATALOG IDENTIFIER(DA.catalog_name);
 # MAGIC USE SCHEMA IDENTIFIER(DA.schema_name);
 
 # COMMAND ----------

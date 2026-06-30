@@ -58,7 +58,7 @@
 
 -- MAGIC %md
 -- MAGIC
--- MAGIC ## A. Classroom Setup
+-- MAGIC ## Data Setup
 -- MAGIC
 -- MAGIC Run the following cell to configure your working environment for this notebook.
 -- MAGIC
@@ -71,7 +71,7 @@
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC Run the cell below to view your default catalog and schema. Notice that your default catalog is **dbacademy** and your default schema is your unique **labuser** schema.
+-- MAGIC Run the cell below to view your default catalog and schema. Notice that your default catalog is **dbx_catalog** and your default schema is your unique **dbx_schema** schema.
 -- MAGIC
 -- MAGIC **NOTE:** The default catalog and schema are pre-configured for you to avoid the need to specify the three-level name when writing your tables (i.e., catalog.schema.table).
 
@@ -97,7 +97,7 @@ SELECT current_catalog(), current_schema()
 
 -- COMMAND ----------
 
-LIST '/Volumes/dbacademy_ecommerce/v01/raw/sales-csv'
+LIST '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into/'
 
 -- COMMAND ----------
 
@@ -118,7 +118,7 @@ LIST '/Volumes/dbacademy_ecommerce/v01/raw/sales-csv'
 
 -- DBTITLE 1,Query raw CSV files
 SELECT * 
-FROM csv.`/Volumes/dbacademy_ecommerce/v01/raw/sales-csv`
+FROM csv.`/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into/`
 LIMIT 5;
 
 -- COMMAND ----------
@@ -135,7 +135,7 @@ LIMIT 5;
 -- DBTITLE 1,Read CSV files with default options in read_files
 SELECT * 
 FROM read_files(
-        "/Volumes/dbacademy_ecommerce/v01/raw/sales-csv",
+        "/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into/Virginia.csv.csv",
         format => "csv"
       )
 LIMIT 5;
@@ -153,7 +153,7 @@ LIMIT 5;
 -- MAGIC
 -- MAGIC    - `format => "csv"` — Indicates that the files are in CSV format.
 -- MAGIC
--- MAGIC    - `sep => "|"` — Specifies that columns are delimited by the pipe (`|`) character.
+-- MAGIC    - `sep => ","` — Specifies that columns are delimited by the pipe (`,`) character.
 -- MAGIC
 -- MAGIC    - `header => true` — Tells the reader to use the first row as column headers.
 -- MAGIC    
@@ -168,9 +168,9 @@ LIMIT 5;
 -- DBTITLE 1,Specify CSV options in read_files
 SELECT * 
 FROM read_files(
-        "/Volumes/dbacademy_ecommerce/v01/raw/sales-csv",
+        "/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into/Virginia.csv.csv",
         format => "csv",
-        sep => "|",
+        sep => ",",
         header => true
       )
 LIMIT 5;
@@ -198,32 +198,32 @@ LIMIT 5;
 
 -- DBTITLE 1,Create a table with read_files from CSV files
 -- Drop the table if it exists for demonstration purposes
-DROP TABLE IF EXISTS sales_bronze;
+DROP TABLE IF EXISTS iris_flower_demo;
 
 
 -- Create the Delta table
-CREATE TABLE sales_bronze AS
+CREATE TABLE iris_flower_demo AS
 SELECT 
   *,
   _metadata.file_modification_time AS file_modification_time,
   _metadata.file_name AS source_file, 
   current_timestamp() as ingestion_time 
 FROM read_files(
-        "/Volumes/dbacademy_ecommerce/v01/raw/sales-csv",
+        "/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into/Virginia.csv.csv",
         format => "csv",
-        sep => "|",
+        sep => ",",
         header => true
       );
 
 
 -- Display the table
 SELECT *
-FROM sales_bronze
+FROM iris_flower_demo
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC 3. View the column data types of the **sales_bronze** table. Notice that the `read_files()` function automatically infers the schema if one is not explicitly provided.
+-- MAGIC 3. View the column data types of the **iris_flower_demo** table. Notice that the `read_files()` function automatically infers the schema if one is not explicitly provided.
 -- MAGIC
 -- MAGIC       **NOTE:** When the schema is not provided, `read_files()` attempts to infer a unified schema across the discovered files, which requires reading all the files unless a LIMIT statement is used. Even when using a LIMIT query, a larger set of files than required might be read to return a more representative schema of the data.
 -- MAGIC
@@ -232,7 +232,7 @@ FROM sales_bronze
 -- COMMAND ----------
 
 -- DBTITLE 1,View the inferred schema
-DESCRIBE TABLE EXTENDED sales_bronze;
+DESCRIBE TABLE EXTENDED iris_flower_demo;
 
 -- COMMAND ----------
 
@@ -246,9 +246,9 @@ DESCRIBE TABLE EXTENDED sales_bronze;
 -- MAGIC df = (spark
 -- MAGIC       .read 
 -- MAGIC       .option("header", True) 
--- MAGIC       .option("sep","|") 
--- MAGIC       .option("rescuedDataColumn", "_rescued_data")       # <--------- Add the rescued data column
--- MAGIC       .csv("/Volumes/dbacademy_ecommerce/v01/raw/sales-csv")
+-- MAGIC       .option("sep",",") 
+-- MAGIC       .option("rescuedDataColumn", "_rescued_data__")       # <--------- Add the rescued data column
+-- MAGIC       .csv("/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into/Virginia.csv.csv")
 -- MAGIC     )
 -- MAGIC
 -- MAGIC df.display()
@@ -297,7 +297,7 @@ values(DA.paths_working_dir)
 
 -- COMMAND ----------
 
-values(DA.paths_working_dir || '/csv_demo_files/malformed_example_1_data.csv')
+values(DA.paths_working_dir || '/csv_for_copy_into/versicolor.csv.csv')
 
 -- COMMAND ----------
 
@@ -331,7 +331,7 @@ values(DA.paths_working_dir || '/csv_demo_files/malformed_example_1_data.csv')
 -- MAGIC %python
 -- MAGIC spark.sql(f'''
 -- MAGIC     SELECT *
--- MAGIC     FROM text.`{DA.paths.working_dir}/csv_demo_files/malformed_example_1_data.csv`
+-- MAGIC     FROM text.`{DA.paths.working_dir}/csv_for_copy_into/malformed_Virginia.csv`
 -- MAGIC ''').display()
 
 -- COMMAND ----------
@@ -347,9 +347,9 @@ values(DA.paths_working_dir || '/csv_demo_files/malformed_example_1_data.csv')
 -- DBTITLE 1,Use read_files without a schema
 SELECT *
 FROM read_files(
-        DA.paths_working_dir || '/csv_demo_files/malformed_example_1_data.csv',
+        DA.paths_working_dir || '/csv_for_copy_into/malformed_Virginia.csv',
         format => "csv",
-        sep => "|",
+        sep => ",",
         header => true
       );
 
@@ -374,15 +374,15 @@ FROM read_files(
 -- DBTITLE 1,Define a schema with read_files
 SELECT *
 FROM read_files(
-        DA.paths_working_dir || '/csv_demo_files/malformed_example_1_data.csv',
+         DA.paths_working_dir || '/csv_for_copy_into/malformed_Virginia',
         format => "csv",
-        sep => "|",
+        sep => ",",
         header => true,
         schema => '''
-            order_id INT, 
-            email STRING, 
-            transactions_timestamp BIGINT''', 
-        rescueddatacolumn => '_rescued_data'    -- Create the _rescued_data column
+            `sepal.length` DOUBLE, 
+            `sepal.width` DOUBLE, 
+            `petal.length` DOUBLE''', 
+        rescueddatacolumn => '_rescued_data____'    -- Create the _rescued_data column
       );
 
 -- COMMAND ----------
@@ -412,7 +412,7 @@ FROM read_files(
 -- MAGIC %python
 -- MAGIC spark.sql(f'''
 -- MAGIC   SELECT *
--- MAGIC   FROM text.`{DA.paths.working_dir}/csv_demo_files/malformed_example_2_data.csv`
+-- MAGIC   FROM text.`{DA.paths.working_dir}/csv_for_copy_into/missing_header_Virginia.csv`
 -- MAGIC ''').display()
 
 -- COMMAND ----------
@@ -431,22 +431,21 @@ FROM read_files(
 
 -- DBTITLE 1,Use read_files to read a malformed CSV file
 -- Drop the table if it exists for demonstration purposes
-DROP TABLE IF EXISTS demo_4_example_2_bronze;
-
+DROP TABLE IF EXISTS iris_demo_example_2;
 -- Create Delta table by ingesting CSV file
-CREATE OR REPLACE TABLE demo_4_example_2_bronze AS
+CREATE OR REPLACE TABLE iris_demo_example_2 AS
 SELECT *
 FROM read_files(
-        DA.paths_working_dir || '/csv_demo_files/malformed_example_2_data.csv',
+        DA.paths_working_dir || '/csv_for_copy_into/missing_header_Virginia.csv',
         format => "csv",
-        sep => "|",
+        sep => ",",
         header => true
       );
 
 
 -- Display the table
 SELECT *
-FROM demo_4_example_2_bronze;
+FROM iris_demo_example_2;
 
 -- COMMAND ----------
 
@@ -461,12 +460,12 @@ FROM demo_4_example_2_bronze;
 
 -- DBTITLE 1,Fix the rescued data column
 SELECT
-  cast(_rescued_data:_c0 AS BIGINT) AS order_id,
+  cast(_rescued_data:_c0 AS DOUBLE) AS order_id,
   *
 FROM read_files(
-        DA.paths_working_dir || '/csv_demo_files/malformed_example_2_data.csv',
+        DA.paths_working_dir || '/csv_for_copy_into/missing_header_Virginia.csv',
         format => "csv",
-        sep => "|",
+        sep => ",",
         header => true
       )
 

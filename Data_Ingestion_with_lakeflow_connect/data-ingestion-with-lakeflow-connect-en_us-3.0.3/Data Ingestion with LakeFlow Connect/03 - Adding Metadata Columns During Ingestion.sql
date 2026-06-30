@@ -101,7 +101,7 @@ SELECT current_catalog(), current_schema()
 -- COMMAND ----------
 
 -- DBTITLE 1,List files in a raw/users-historical volume
-LIST '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
+LIST '/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files'
 
 -- COMMAND ----------
 
@@ -139,7 +139,7 @@ LIST '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
 
 SELECT *
 FROM read_files(
-  "/Volumes/dbacademy_ecommerce/v01/raw/users-historical",
+  "/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files",
   format => 'parquet')
 LIMIT 10;
 
@@ -164,10 +164,10 @@ LIMIT 10;
 
 -- DBTITLE 1,Convert UNIX timestamp
 SELECT
-  *,
-  cast(from_unixtime(user_first_touch_timestamp/1000000) AS DATE) AS first_touch_date
+  *
+ -- cast(from_unixtime(user_first_touch_timestamp/1000000) AS DATE) AS first_touch_date
 FROM read_files(
-  "/Volumes/dbacademy_ecommerce/v01/raw/users-historical",
+  "/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files",
   format => 'parquet')
 LIMIT 10;
 

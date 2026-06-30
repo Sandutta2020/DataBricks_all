@@ -159,9 +159,9 @@ SELECT current_catalog(), current_schema()
 -- DBTITLE 1,Preview the CSV file in your volume
 SELECT *
 FROM read_files(
-  '/Volumes/dbacademy/' || DA.schema_name || '/csv_files_autoloader_source',
+  '/Volumes/'||DA.catalog_name||'/' || DA.schema_name || '/csv_files_autoloader_source',
   format => 'CSV',
-  sep => '|',
+  sep => ',',
   header => true
 );
 
@@ -192,11 +192,41 @@ SCHEDULE EVERY 1 WEEK     -- Scheduling the refresh is optional
 AS
 SELECT *
 FROM STREAM read_files(
-  '/Volumes/dbacademy/your-labuser-name/csv_files_autoloader_source',  -- Insert the path to you csv_files_autoloader_source volume (example shown)
+   '/Volumes/'||DA.catalog_name||'/' || DA.schema_name || '/csv_files_autoloader_source',  -- Insert the path to you csv_files_autoloader_source volume (example shown)
   format => 'CSV',
-  sep => '|',
+  sep => ',',
   header => true
 );
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC source_path = "/Volumes/dbx_catalog/dbx_schema/csv_files_autoloader_source" 
+-- MAGIC checkpoint_path = "/Volumes/dbx_catalog/dbx_schema/csv_files_autoloader_source/_checkpoint"
+-- MAGIC schema_path = "/Volumes/dbx_catalog/dbx_schema/csv_files_autoloader_source/_schema"
+-- MAGIC
+-- MAGIC # 2. Build the exact same Auto Loader stream in Python
+-- MAGIC csv_autoloader_stream = (
+-- MAGIC     spark.readStream
+-- MAGIC     .format("cloudFiles")
+-- MAGIC     .option("cloudFiles.format", "csv")
+-- MAGIC     .option("sep", ",")
+-- MAGIC     .option("header", "true")
+-- MAGIC     .option("cloudFiles.inferColumnTypes", "true") # Equivalent to inferSchema => true
+-- MAGIC     .option("cloudFiles.schemaLocation", schema_path) 
+-- MAGIC     .load(source_path)
+-- MAGIC )
+-- MAGIC
+-- MAGIC # 3. Write it out to your target Delta Table
+-- MAGIC query = (
+-- MAGIC     csv_autoloader_stream.writeStream
+-- MAGIC     .format("delta")
+-- MAGIC     .option("checkpointLocation", checkpoint_path)
+-- MAGIC     .trigger(availableNow=True) # Runs once like a batch, perfect for the Free Edition
+-- MAGIC     .table("dbx_catalog.dbx_schema.sql_csv_autoloader") # Creates your target table
+-- MAGIC )
+-- MAGIC
+-- MAGIC query.awaitTermination()
 
 -- COMMAND ----------
 
@@ -205,9 +235,9 @@ FROM STREAM read_files(
 -- MAGIC
 -- MAGIC    a. Select the catalog icon on the left ![Catalog Icon](./Includes/images/catalog_icon.png).
 -- MAGIC
--- MAGIC    b. Expand the **dbacademy** catalog.
+-- MAGIC    b. Expand the **dbx_catalog** catalog.
 -- MAGIC
--- MAGIC    c. Expand your **labuser** schema.
+-- MAGIC    c. Expand your **dbx_schema** schema.
 -- MAGIC
 -- MAGIC    d. Expand your **Tables**.
 -- MAGIC
@@ -224,7 +254,7 @@ FROM STREAM read_files(
 
 -- DBTITLE 1,View the streaming table
 SELECT *
-FROM sql_csv_autoloader;
+FROM dbx_catalog.dbx_schema.sql_csv_autoloader;
 
 -- COMMAND ----------
 
@@ -312,12 +342,13 @@ DESCRIBE HISTORY sql_csv_autoloader;
 
 -- COMMAND ----------
 
-REFRESH STREAMING TABLE sql_csv_autoloader;
+-- DBTITLE 1,Refreshing Streaming table
+REFRESH STREAMING TABLE dbx_catalog.dbx_schema.sql_csv_autoloader;
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC 10. Run the cell below to view the data in the **sql_csv_autoloader** table. Notice that the table now contains **6,081 rows**.
+-- MAGIC 10. Run the cell below to view the data in the **sql_csv_autoloader** table. Notice that the table now contains **50 rows**.
 -- MAGIC
 
 -- COMMAND ----------

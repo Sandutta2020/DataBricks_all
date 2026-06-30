@@ -13,8 +13,8 @@ DA.init()
 # MAGIC
 # MAGIC -- Create a temp view storing information from the obs table.
 # MAGIC CREATE OR REPLACE TEMP VIEW user_info AS
-# MAGIC SELECT map_from_arrays(collect_list(replace(key,'.','_')), collect_list(value))
-# MAGIC FROM dbacademy.ops.meta;
+# MAGIC SELECT map_from_arrays(collect_list(replace(key_name,'.','_')), collect_list(value_data))
+# MAGIC FROM main.default.project_credential;
 # MAGIC
 # MAGIC -- Create SQL dictionary var (map)
 # MAGIC DECLARE OR REPLACE DA MAP<STRING,STRING>;
@@ -110,7 +110,7 @@ def create_directory_in_user_volume(user_default_volume_path: str, create_folder
     print('----------------------------------------------------------------------------------------\n')
 
 
-create_directory_in_user_volume(user_default_volume_path = DA.paths.working_dir, create_folders = ['csv_demo_files', 'json_demo_files', 'xml_demo_files'])
+create_directory_in_user_volume(user_default_volume_path = DA.paths.working_dir, create_folders = ['csv_demo_files', 'json_demo_files', 'xml_demo_files','parquet_demo_files'])
 
 # COMMAND ----------
 

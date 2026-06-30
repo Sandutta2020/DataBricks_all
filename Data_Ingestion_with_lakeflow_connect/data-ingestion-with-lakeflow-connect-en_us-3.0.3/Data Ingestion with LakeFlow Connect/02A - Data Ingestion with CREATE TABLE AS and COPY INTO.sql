@@ -89,7 +89,7 @@ SELECT current_catalog(), current_schema()
 
 -- MAGIC %md
 -- MAGIC 1. We'll create a table containing historical user data from Parquet files stored in the volume  
--- MAGIC    `'/Volumes/dbacademy_ecommerce/v01/raw/users-historical'` within Unity Catalog.
+-- MAGIC    `'/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files/'` within Unity Catalog.
 -- MAGIC
 -- MAGIC    Use the `LIST` statement to view the files in this volume. Run the cell and review the results.
 -- MAGIC
@@ -98,7 +98,7 @@ SELECT current_catalog(), current_schema()
 -- COMMAND ----------
 
 -- DBTITLE 1,List files in a raw/users-historical volume
-LIST '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
+LIST '/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files/'
 
 -- COMMAND ----------
 
@@ -109,7 +109,7 @@ LIST '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
 
 -- DBTITLE 1,View parquet data
 SELECT * 
-FROM parquet.`/Volumes/dbacademy_ecommerce/v01/raw/users-historical`;
+FROM parquet.`/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files`;
 
 -- COMMAND ----------
 
@@ -165,7 +165,7 @@ FROM parquet.`/Volumes/dbacademy_ecommerce/v01/raw/users-historical`;
 -- DBTITLE 1,Read parquet with read_files
 SELECT * 
 FROM read_files(
-  '/Volumes/dbacademy_ecommerce/v01/raw/users-historical',
+  '/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files',
   format => 'parquet'
 )
 LIMIT 10;
@@ -181,21 +181,21 @@ LIMIT 10;
 
 -- DBTITLE 1,Create table with read_files
 -- Drop the table if it exists for demonstration purposes
-DROP TABLE IF EXISTS historical_users_bronze_ctas_rf;
+DROP TABLE IF EXISTS Iris_table_demo;
 
 
 -- Create the Delta table
-CREATE TABLE historical_users_bronze_ctas_rf 
+CREATE TABLE Iris_table_demo 
 SELECT * 
 FROM read_files(
-        '/Volumes/dbacademy_ecommerce/v01/raw/users-historical',
+        '/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files',
         format => 'parquet'
       );
 
 
 -- Preview the Delta table
 SELECT * 
-FROM historical_users_bronze_ctas_rf 
+FROM Iris_table_demo 
 LIMIT 10;
 
 -- COMMAND ----------
@@ -216,7 +216,7 @@ LIMIT 10;
 
 -- COMMAND ----------
 
-DESCRIBE TABLE EXTENDED historical_users_bronze_ctas_rf;
+DESCRIBE TABLE EXTENDED Iris_table_demo;
 
 -- COMMAND ----------
 
@@ -249,7 +249,7 @@ DESCRIBE TABLE EXTENDED historical_users_bronze_ctas_rf;
 -- MAGIC df = (spark
 -- MAGIC       .read
 -- MAGIC       .format("parquet")
--- MAGIC       .load("/Volumes/dbacademy_ecommerce/v01/raw/users-historical")
+-- MAGIC       .load("/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files")
 -- MAGIC     )
 -- MAGIC
 -- MAGIC
@@ -257,13 +257,21 @@ DESCRIBE TABLE EXTENDED historical_users_bronze_ctas_rf;
 -- MAGIC (df
 -- MAGIC  .write
 -- MAGIC  .mode("overwrite")
--- MAGIC  .saveAsTable(f"dbacademy.{DA.schema_name}.historical_users_bronze_python")
+-- MAGIC  .saveAsTable(f"{DA.catalog_name}.{DA.schema_name}.Iris_table_demo_python")
 -- MAGIC )
 -- MAGIC
 -- MAGIC
 -- MAGIC ## 3. Read and view the table
--- MAGIC users_bronze_table = spark.table(f"dbacademy.{DA.schema_name}.historical_users_bronze_python")
+-- MAGIC users_bronze_table = spark.table(f"{DA.catalog_name}.{DA.schema_name}.Iris_table_demo_python")
 -- MAGIC users_bronze_table.display()
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC df.write.\
+-- MAGIC mode("overwrite").\
+-- MAGIC partitionBy("variety").\
+-- MAGIC csv('/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_demo_files',header=True)
 
 -- COMMAND ----------
 
@@ -310,20 +318,41 @@ DESCRIBE TABLE EXTENDED historical_users_bronze_ctas_rf;
 --------------------------------------------
 
 -- Drop the table if it exists for demonstration purposes
-DROP TABLE IF EXISTS historical_users_bronze_ci;
+DROP TABLE IF EXISTS iris_table_copy_into_demo;
 
 
 -- Create an empty table with the specified table schema (only 2 out of the 3 columns)
-CREATE TABLE historical_users_bronze_ci (
-  user_id STRING,
-  user_first_touch_timestamp BIGINT
-);
+CREATE TABLE IF NOT EXISTS iris_table_copy_into_demo (
+  `sepal.length` DOUBLE,
+  `sepal.width` DOUBLE,
+  `petal.length` DOUBLE,
+  `petal.width` DOUBLE);
 
 
 -- Use COPY INTO to populate Delta table
-COPY INTO historical_users_bronze_ci
-  FROM '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
-  FILEFORMAT = parquet;
+COPY INTO iris_table_copy_into_demo
+  FROM '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into'
+  FILEFORMAT = csv
+  FORMAT_OPTIONS ('header' = 'true', 'inferSchema' = 'true');
+
+-- COMMAND ----------
+
+COPY INTO iris_table_copy_into_demo
+  FROM '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into'
+  FILEFORMAT = csv
+  FORMAT_OPTIONS ('header' = 'true', 'inferSchema' = 'true');
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC Now manually upload the other csv
+
+-- COMMAND ----------
+
+COPY INTO iris_table_copy_into_demo
+  FROM '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into'
+  FILEFORMAT = csv
+  FORMAT_OPTIONS ('header' = 'true', 'inferSchema' = 'true');
 
 -- COMMAND ----------
 
@@ -335,10 +364,27 @@ COPY INTO historical_users_bronze_ci
 -- COMMAND ----------
 
 -- DBTITLE 1,COPY INTO with schema evolution
-COPY INTO historical_users_bronze_ci
-  FROM '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
-  FILEFORMAT = parquet
-  COPY_OPTIONS ('mergeSchema' = 'true');     -- Merge the schema of each file
+DROP TABLE IF EXISTS iris_table_copy_into_demo_mergedSchema;
+
+
+-- Create an empty table with the specified table schema (only 2 out of the 3 columns)
+CREATE TABLE IF NOT EXISTS iris_table_copy_into_demo_mergedSchema;
+
+
+-- Use COPY INTO to populate Delta table
+COPY INTO iris_table_copy_into_demo_mergedSchema
+  FROM '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into'
+  FILEFORMAT = csv
+  FORMAT_OPTIONS ('header' = 'true', 'inferSchema' = 'true');
+
+-- COMMAND ----------
+
+-- Use COPY INTO to populate Delta table
+COPY INTO iris_table_copy_into_demo_mergedSchema
+  FROM '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into'
+  FILEFORMAT = csv
+  FORMAT_OPTIONS ('header' = 'true', 'inferSchema' = 'true')
+  COPY_OPTIONS ('mergeSchema' = 'true');
 
 -- COMMAND ----------
 
@@ -349,7 +395,7 @@ COPY INTO historical_users_bronze_ci
 
 -- DBTITLE 1,View data in the created table
 SELECT *
-FROM historical_users_bronze_ci
+FROM iris_table_copy_into_demo_mergedSchema
 LIMIT 10;
 
 -- COMMAND ----------
@@ -362,23 +408,6 @@ LIMIT 10;
 -- MAGIC    Then, add the `COPY_OPTIONS ('mergeSchema' = 'true')` option to enable schema evolution for the table.
 -- MAGIC
 -- MAGIC    Run the cell and confirm that 251,501 rows were added to the Delta table.
-
--- COMMAND ----------
-
--- DBTITLE 1,COPY INTO with schema evolution
--- Drop the table if it exists for demonstration purposes
-DROP TABLE IF EXISTS historical_users_bronze_ci_no_schema;
-
-
--- Create an empty table without the specified schema
-CREATE TABLE historical_users_bronze_ci_no_schema;
-
-
--- Use COPY INTO to populate Delta table
-COPY INTO historical_users_bronze_ci_no_schema
-  FROM '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
-  FILEFORMAT = parquet
-  COPY_OPTIONS ('mergeSchema' = 'true');
 
 -- COMMAND ----------
 
@@ -399,9 +428,11 @@ COPY INTO historical_users_bronze_ci_no_schema
 -- COMMAND ----------
 
 -- DBTITLE 1,COPY INTO idempotency
-COPY INTO historical_users_bronze_ci_no_schema
-  FROM '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
-  FILEFORMAT = parquet
+-- Use COPY INTO to a Delta table
+COPY INTO iris_table_copy_into_demo_mergedSchema
+  FROM '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_for_copy_into'
+  FILEFORMAT = csv
+  FORMAT_OPTIONS ('header' = 'true', 'inferSchema' = 'true')
   COPY_OPTIONS ('mergeSchema' = 'true');
 
 -- COMMAND ----------

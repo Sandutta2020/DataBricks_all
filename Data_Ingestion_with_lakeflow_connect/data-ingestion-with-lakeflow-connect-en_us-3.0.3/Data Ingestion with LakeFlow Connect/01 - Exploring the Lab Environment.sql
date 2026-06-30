@@ -118,7 +118,7 @@ values(DA.schema_name)
 -- COMMAND ----------
 
 -- Change the default catalog/schema
-USE CATALOG dbacademy;
+USE CATALOG dbx_catalog;
 USE SCHEMA IDENTIFIER(DA.schema_name);
 
 
@@ -145,7 +145,11 @@ SELECT
 
 -- COMMAND ----------
 
-SHOW SCHEMAS IN dbacademy;
+SHOW SCHEMAS IN dbx_catalog;
+
+-- COMMAND ----------
+
+
 
 -- COMMAND ----------
 
@@ -190,38 +194,7 @@ DESCRIBE TABLE EXTENDED mydeltatable
 
 -- COMMAND ----------
 
--- MAGIC %md
--- MAGIC #### B4.1 UI Exploration
--- MAGIC
--- MAGIC Complete the following to explore the **dbacademy_ecommerce** catalog:
--- MAGIC
--- MAGIC 1. In the left navigation bar, select the catalog icon:  ![Catalog Icon](./Includes/images/catalog_icon.png)
--- MAGIC
--- MAGIC 2. Locate the catalog called **dbacademy_ecommerce** and expand the catalog.
--- MAGIC
--- MAGIC 3. Expand the **v01** schema. Notice that this catalog contains two volumes, **delta** and **raw**.
--- MAGIC
--- MAGIC 4. Expand the **raw** volume. Notice that the volume contains a series of folders.
--- MAGIC
--- MAGIC 5. Expand the **users-historical** folder. Notice that the folder contains a series of files.
--- MAGIC
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC #### B4.2 Volume Exploration with SQL
--- MAGIC
--- MAGIC Run the `DESCRIBE VOLUME` statement to return the metadata for the **dbacademy_ecommerce.v01.raw** volume. The metadata includes the volume name, schema, catalog, type, comment, owner, and more.
--- MAGIC
--- MAGIC Notice the following:
--- MAGIC - Under the **storage_location** column, you can see the cloud storage location for this volume.
--- MAGIC
--- MAGIC - Under the **volume_type** column, it indicates this is a *MANAGED* volume.
--- MAGIC
-
--- COMMAND ----------
-
-DESCRIBE VOLUME dbacademy_ecommerce.v01.raw;
+DESCRIBE VOLUME dbx_catalog.dbx_schema.dbx_volume
 
 -- COMMAND ----------
 
@@ -229,7 +202,7 @@ DESCRIBE VOLUME dbacademy_ecommerce.v01.raw;
 -- MAGIC #### B4.3 List Files in a Volume
 -- MAGIC
 -- MAGIC
--- MAGIC Use the `LIST` statement to list the available files in the **raw** volume's **users-historical** directory (`/Volumes/dbacademy_ecommerce/v01/raw/users-historical`) and view the results.
+-- MAGIC Use the `LIST` statement to list the available files in the **raw** volume's **users-historical** directory (`/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_demo_files`) and view the results.
 -- MAGIC
 -- MAGIC Notice the following:
 -- MAGIC - Ignore any file names that begin with an underscore (_). These are temporary or intermediate files used when writing files to a location.
@@ -243,7 +216,7 @@ DESCRIBE VOLUME dbacademy_ecommerce.v01.raw;
 
 -- COMMAND ----------
 
-LIST '/Volumes/dbacademy_ecommerce/v01/raw/users-historical'
+LIST '/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_demo_files'
 
 -- COMMAND ----------
 

@@ -206,14 +206,27 @@ LIMIT 10;
 -- DBTITLE 1,Add metadata columns
 SELECT
   *,
-  cast(from_unixtime(user_first_touch_timestamp / 1000000) AS DATE) AS first_touch_date,
   _metadata.file_modification_time AS file_modification_time,      -- Last data source file modification time
   _metadata.file_name AS source_file,                              -- Ingest data source file name
   current_timestamp() as ingestion_time                            -- Ingestion timestamp
 FROM read_files(
-  "/Volumes/dbacademy_ecommerce/v01/raw/users-historical",
+  "/Volumes/dbx_catalog/dbx_schema/dbx_volume/parquet_demo_files/",
   format => 'parquet')
-LIMIT 10;
+LIMIT 5;
+
+-- COMMAND ----------
+
+SELECT
+  *,
+  _metadata.file_modification_time AS file_modification_time,      -- Last data source file modification time
+  _metadata.file_name AS source_file,                              -- Ingest data source file name
+  current_timestamp() as ingestion_time                            -- Ingestion timestamp
+FROM read_files(
+  "/Volumes/dbx_catalog/dbx_schema/dbx_volume/csv_demo_files/",
+  format => 'csv',
+  header => true,
+  inferSchema =>true)
+LIMIT 60;
 
 -- COMMAND ----------
 

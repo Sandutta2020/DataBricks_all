@@ -65,11 +65,12 @@ class DBAcademyHelper(NestedNamespace):
         self.workspace = WorkspaceClient()
 
         try:
-            default_catalog = self.workspace.settings.default_namespace.get().namespace.value
+            #default_catalog = self.workspace.settings.default_namespace.get().namespace.value
+            default_catalog ='main'
         except:
             default_catalog = 'dbacademy'
 
-        meta = f'{default_catalog}.ops.meta'
+        meta = f'{default_catalog}.default.project_credential'
         catalog = None
         schema = None
 
@@ -85,19 +86,36 @@ class DBAcademyHelper(NestedNamespace):
 
         # query the metadata table and populate self with key/values
         for row in rows:
-            setattr(self, row['key'], row['value'])
+            setattr(self, row['key_name'], row['value_data'])
 
-            if row['key'] == 'catalog_name':
-                catalog = row['value']
-            elif row['key'] == 'schema_name':
-                schema = row['value']
+            if row['key_name'] == 'catalog_name':
+                catalog = row['value_data']
+            elif row['key_name'] == 'schema_name':
+                schema = row['value_data']
+            elif row['key_name'] == 'volume_name':
+                volume_name = row['value_data']
 
+        # Check if the catalog is present
+        
+        catalogs = [row.catalog for row in spark.sql("SHOW CATALOGS").collect()]
+        if catalog not in catalogs:
+            print(f'catalog {catalog} not present so creating one' )
+            spark.sql(f'create catalog {catalog}')
+            spark.sql(f'create SCHEMA {catalog}.{schema}')
+            spark.sql(f'create volume {catalog}.{schema}.{volume_name}')
+
+
+
+        
+        
         # set default catalog and schema according to metadata
         if catalog:
             spark.sql(f'USE CATALOG {catalog}')
 
             if schema:
                 spark.sql(f'USE SCHEMA {schema}')
+        
+
 
     # add an initializer. Initializers can be chained are are all called when DA.init() is called.
     # This pattern makes it easier to dynamically augment the class across cells or notebooks.

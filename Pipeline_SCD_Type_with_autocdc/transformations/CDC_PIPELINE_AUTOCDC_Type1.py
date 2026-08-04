@@ -12,8 +12,8 @@ dp.create_auto_cdc_flow(
   source = "users",
   keys = ["userId"],
   sequence_by = col("_commit_timestamp"),
-  apply_as_deletes = expr("_change_type = 'DELETE'"),
-  apply_as_truncates = expr("_change_type = 'TRUNCATE'"),
+  apply_as_deletes = expr("_change_type = 'delete'"),
+  apply_as_truncates = expr("_change_type = 'truncate'"),
   except_column_list = ["_change_type", "_commit_version","_commit_timestamp"],
   stored_as_scd_type = 1
 )

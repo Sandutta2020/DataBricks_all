@@ -11,25 +11,40 @@ This repository demonstrates how to build an automated, real-time **Change Data 
 By capturing Delta Lake **Change Data Feed (CDF)** streams and applying incremental updates to target Delta tables, this pipeline handles standard **SCD Type 1 (Slowly Changing Dimensions)** operations—including `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` operations—seamlessly without manual merge/upsert logic.
 
 ---
-
+![alt](/Users/sandutta2020@gmail.com/DataBricks_all/image_1785912463953.png)
 ## 🏗️ Architecture & Data Flow
 
-The CDC flow follows a two-tier streaming architecture designed for low-latency state synchronisation:<br>
-┌────────────────────────────────────────────────────────┐ <br>
-│     cdc_catalog.cdc_schema.users_cdf    │  <-- Source Table (Delta Change Data Feed) <br> |
-└────────────────────┬───────────────────────────────────┘<br>
-                     │<br>
-<center>▼</center><br>
-┌─────────────────────────────────────────┐<br>
-│              users (View)               │  <-- DLT Streaming View<br>
-└────────────────────┬────────────────────┘<br>
-│<br>
-│  dp.create_auto_cdc_flow()
-│  (Keys: userId, Seq: sequenceNum)
-<center>▼</center><br>
-┌─────────────────────────────────────────┐
-│            users_current                │  <-- Target DLT Streaming Table (SCD Type 1)
-└─────────────────────────────────────────┘
+===================================================================================
+                       PIPELINE ARCHITECTURE (DAG)
+===================================================================================
+
+ [ SOURCE SYSTEM ]
+        │
+        ▼
+ ┌──────────────────────────────┐
+ │    customer_source_table     │  (Delta Table with CDF Enabled)
+ └──────────────┬───────────────┘
+                │
+                │ 1. calling_customer_cdf() [readStream + readChangeFeed]
+                ▼
+ ┌──────────────────────────────┐
+ │        customers_cdf         │  (Raw / Staging Table)
+ └──────┬────────────────┬──────┘
+        │                │
+        │                │
+        │ (SCD1 Flow)    │ (SCD2 Flow)
+        ▼                ▼
+ ┌──────────────┐ ┌──────────────┐
+ │  @dp.view    │ │  @dp.view    │  (Ephemeral Pipeline Views)
+ │   (users)    │ │  (users_2)   │
+ └──────┬───────┘ └──────┬───────┘
+        │                │
+        │                │
+        ▼                ▼
+ ┌──────────────┐ ┌──────────────┐
+ │ users_current│ │ users_history│  (Curated / Silver Delta Tables)
+ │ (SCD Type 1) │ │ (SCD Type 2) │
+ └──────────────┘ └──────────────┘
 
 ## 💻 Code Walkthrough for SSCD Type 1
 

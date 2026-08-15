@@ -1,0 +1,44 @@
+# Install Declarative Automation Bundles package locally
+# pip install databricks-bundles==0.275.0
+#
+# copy contents into resources/My_jobs_for_weather_checking.py
+from databricks.bundles.jobs import Job
+
+
+My_jobs_for_weather_checking = Job.from_dict(
+    {
+        "name": "My_jobs_for_weather_checking",
+        "email_notifications": {
+            "on_start": [
+                "sandutta2020@gmail.com",
+            ],
+            "on_success": [
+                "sandutta2020@gmail.com",
+            ],
+            "on_failure": [
+                "sandutta2020@gmail.com",
+            ],
+        },
+        "tasks": [
+            {
+                "task_key": "Weather_check",
+                "spark_python_task": {
+                    "python_file": "/Workspace/Users/sandutta2020@gmail.com/DataBricks_all/Weather_checking/app.py",
+                },
+                "environment_key": "Default",
+            },
+        ],
+        "queue": {
+            "enabled": True,
+        },
+        "environments": [
+            {
+                "environment_key": "Default",
+                "spec": {
+                    "environment_version": "5",
+                },
+            },
+        ],
+        "performance_target": "PERFORMANCE_OPTIMIZED",
+    }
+)

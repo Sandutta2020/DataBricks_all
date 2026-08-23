@@ -1,0 +1,570 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">03 - Execute</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Incremental Sync and CDC
+-- MAGIC
+-- MAGIC This lesson covers implementing Change Data Capture (CDC) patterns to keep Databricks tables synchronized with Oracle changes. You will implement Delta **`MERGE`** for upserts and use **`AUTO CDC INTO`** for SCD handling in Lakeflow Spark Declarative Pipelines.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Implement Delta **`MERGE`** with SCD Type 1 semantics using Oracle CDC data
+-- MAGIC - Use **`AUTO CDC INTO`** in Lakeflow SDP for SCD Type 2 history tracking
+-- MAGIC - Map Oracle CDC metadata (e.g., operation types) to Databricks flow logic
+-- MAGIC - Handle out-of-order events using sequence columns
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 1. CDC Concept Mapping
+-- MAGIC
+-- MAGIC Oracle and Databricks approach CDC differently. Understanding the mapping is essential for conversion.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph OR["Oracle CDC"]
+-- MAGIC         MVL["Materialized View Logs"]
+-- MAGIC         TRG["Triggers / CDC Logic"]
+-- MAGIC         SCH["DBMS_SCHEDULER"]
+-- MAGIC         MRG1["MERGE"]
+-- MAGIC     end
+-- MAGIC     subgraph DB["Databricks CDC"]
+-- MAGIC         CDF["Change Data Feed"]
+-- MAGIC         ACI["AUTO CDC INTO"]
+-- MAGIC         WF["Lakeflow Jobs"]
+-- MAGIC         MRG2["MERGE"]
+-- MAGIC     end
+-- MAGIC     MVL -->|"converts to"| CDF
+-- MAGIC     MVL -->|"or"| ACI
+-- MAGIC     TRG -->|"or"| ACI
+-- MAGIC     SCH -->|"converts to"| WF
+-- MAGIC     MRG1 -->|"direct mapping"| MRG2
+-- MAGIC     style OR fill:#fff,stroke:#FF8C00,stroke-width:2px
+-- MAGIC     style DB fill:#fff,stroke:#FF3621,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | Purpose |
+-- MAGIC |-----------|------------|---------|
+-- MAGIC | MV Logs (`MLOG$` — Oracle's internal mechanism for capturing row-level changes to support materialized view refresh) | Change Data Feed (CDF) | Captures row-level changes (I/U/D) |
+-- MAGIC | Triggers / CDC Logic | Lakeflow Job / Lakeflow SDP | Capture and process change events |
+-- MAGIC | `MERGE INTO` | `MERGE INTO` | Applies changes to target (SCD1) |
+-- MAGIC | Operation flags | `_change_type` | Identifies operation type |
+-- MAGIC | Transaction SCN | `SEQUENCE BY` | Ensures correct ordering of changes |
+-- MAGIC | N/A | `AUTO CDC INTO` | Declarative CDC with out-of-order handling | 
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 2. Oracle: CDC Logic (SCD Type 1)
+-- MAGIC
+-- MAGIC In Oracle, CDC is often handled by capturing changes into a separate table (e.g., via triggers or GoldenGate) and then merging those changes into the main table.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: HR.EMPLOYEES CDC MERGE (source)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Example: Applying changes from a CDC staging table to HR.EMPLOYEES
+-- MAGIC MERGE INTO HR.EMPLOYEES e
+-- MAGIC USING HR.EMPLOYEES_CDC c
+-- MAGIC ON (e.EMPLOYEE_ID = c.EMPLOYEE_ID)
+-- MAGIC WHEN MATCHED THEN
+-- MAGIC   UPDATE SET 
+-- MAGIC     e.FIRST_NAME = c.FIRST_NAME,
+-- MAGIC     e.LAST_NAME = c.LAST_NAME,
+-- MAGIC     e.SALARY = c.SALARY
+-- MAGIC   DELETE WHERE (c.OP_TYPE = 'D')
+-- MAGIC WHEN NOT MATCHED THEN
+-- MAGIC   INSERT (EMPLOYEE_ID, FIRST_NAME, LAST_NAME, SALARY)
+-- MAGIC   VALUES (c.EMPLOYEE_ID, c.FIRST_NAME, c.LAST_NAME, c.SALARY)
+-- MAGIC   WHERE (c.OP_TYPE = 'I');
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 3. Databricks: Delta MERGE (SCD Type 1)
+-- MAGIC
+-- MAGIC The Delta `MERGE` syntax is very similar to Oracle's. It is used to apply incremental changes to target tables. In a migration, you will often ingest CDC events into a streaming table, then merge into a target dimension table.
+-- MAGIC
+-- MAGIC Using `MERGE` is a simple way to keep a table up to date with a source table. SCD Type 1 handling overwrites old data when an update happens. This is the most commont CDC pattern for dimension tables where history is not required.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Databricks: Delta MERGE for Employees (SCD Type 1)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC MERGE INTO hr_migration.employees AS target
+-- MAGIC USING hr_migration.employees_cdc_stg AS source
+-- MAGIC ON target.employee_id = source.employee_id
+-- MAGIC WHEN MATCHED AND source.op_type = 'D' THEN
+-- MAGIC   DELETE
+-- MAGIC WHEN MATCHED THEN
+-- MAGIC   UPDATE SET 
+-- MAGIC     target.first_name = source.first_name,
+-- MAGIC     target.last_name = source.last_name,
+-- MAGIC     target.salary = source.salary,
+-- MAGIC     target.updated_at = current_timestamp()
+-- MAGIC WHEN NOT MATCHED AND source.op_type != 'D' THEN
+-- MAGIC   INSERT (employee_id, first_name, last_name, salary, created_at, updated_at)
+-- MAGIC   VALUES (source.employee_id, source.first_name, source.last_name, source.salary, current_timestamp(), current_timestamp());
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">MERGE Performance</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">For large tables, ensure the target table is clustered on the join key (<code>employee_id</code> in the previous example). Use Liquid Clustering (<code>CLUSTER BY (employee_id)</code>) to improve data skipping and reduce the number of files scanned during <code>MERGE</code> operations.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 4. SCD Type 2: History Tracking (2-Step)
+-- MAGIC
+-- MAGIC SCD Type 2 maintains a history of changes with validity periods by tracking *valid-from* and *valid-to* timestamps. This requires more complex logic in manual `MERGE`, or can be handled declaratively with `AUTO CDC INTO` (using Lakeflow Spark Declarative Pipelines (SDP)).
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### SCD Type 2 Record Lifecycle
+-- MAGIC <br/>
+-- MAGIC <div class="mermaid">
+-- MAGIC sequenceDiagram
+-- MAGIC     participant S as Source
+-- MAGIC     participant T as Target Table
+-- MAGIC     Note over T: 🟢 employee_id=1 (Initial State)<br/>name="John",..., valid_from=2024-01-01, valid_to=NULL, is_current=true
+-- MAGIC     S->>T: 🔄 UPDATE name="Jonathan"
+-- MAGIC     Note over T: 🔴 employee_id=1 (Expired Record)<br/>name="John",...,valid_from=2024-01-01, valid_to=2024-06-15, is_current=false
+-- MAGIC     Note over T: 🟢 employee_id=1 (Current Record)<br/>name="Jonathan",...,valid_from=2024-06-15, valid_to=NULL, is_current=true
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+-- MAGIC <br/>
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> : SCD Type 2 MERGE</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Step 1: Expire current records that have updates
+-- MAGIC UPDATE HR.EMPLOYEE_DIM_SCD2
+-- MAGIC SET valid_to = SYSDATE, is_current = 0
+-- MAGIC WHERE employee_id IN (
+-- MAGIC     SELECT employee_id FROM HR.EMPLOYEE_CDC
+-- MAGIC     WHERE operation_type = 'UPDATE'
+-- MAGIC ) AND is_current = 1;
+-- MAGIC
+-- MAGIC -- Step 2: Insert new versions (for INSERT and UPDATE)
+-- MAGIC INSERT INTO HR.EMPLOYEE_DIM_SCD2 (
+-- MAGIC     employee_id, first_name, last_name, city, e_mail,
+-- MAGIC     valid_from, valid_to, is_current
+-- MAGIC )
+-- MAGIC SELECT
+-- MAGIC     employee_id, first_name, last_name, city, e_mail,
+-- MAGIC     SYSDATE, TO_DATE('9999-12-31', 'YYYY-MM-DD'), 1
+-- MAGIC FROM HR.EMPLOYEE_CDC
+-- MAGIC WHERE operation_type IN ('INSERT', 'UPDATE');
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> : SCD Type 2 MERGE</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Step 1: Expire current records
+-- MAGIC UPDATE hr_harmonized.employee_dim_scd2
+-- MAGIC SET valid_to = current_timestamp(), is_current = FALSE
+-- MAGIC WHERE employee_id IN (
+-- MAGIC     SELECT employee_id FROM harmonized.employee_cdc
+-- MAGIC     WHERE _operation IN ('UPDATE', 'INSERT')
+-- MAGIC ) AND is_current = TRUE;
+-- MAGIC <br/>
+-- MAGIC -- Step 2: Insert new versions
+-- MAGIC INSERT INTO hr_harmonized.employee_dim_scd2 (
+-- MAGIC     employee_id, first_name, last_name, city, e_mail,
+-- MAGIC     valid_from, valid_to, is_current
+-- MAGIC )
+-- MAGIC SELECT 
+-- MAGIC     employee_id, first_name, last_name, city, e_mail,
+-- MAGIC     current_timestamp(), CAST('9999-12-31' AS TIMESTAMP), TRUE
+-- MAGIC FROM hr_harmonized.employee_cdc
+-- MAGIC WHERE _operation IN ('UPDATE', 'INSERT');
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 5. Lakeflow SDP: AUTO CDC INTO
+-- MAGIC
+-- MAGIC For production CDC pipelines, use `AUTO CDC INTO` in Lakeflow Spark Declarative Pipelines. `AUTO CDC INTO` handles the complexity of versioning and SCD logic automatically, including out-of-order event processing.  The Declarative Pipelines code examples shown below are in SQL but these can be defined in Python as well.
+-- MAGIC <br/>
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 AUTO CDC INTO - SCD Type 1</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Lakeflow SDP Pipeline SQL (not executable in notebooks)
+-- MAGIC CREATE OR REFRESH STREAMING TABLE employee_dim;
+-- MAGIC <br/>
+-- MAGIC CREATE FLOW employee_cdc_flow
+-- MAGIC AS AUTO CDC INTO employee_dim
+-- MAGIC FROM STREAM(hr_harmonized.employee_cdc)
+-- MAGIC KEYS (employee_id)
+-- MAGIC APPLY AS DELETE WHEN _operation = 'DELETE'
+-- MAGIC SEQUENCE BY _sequence_num
+-- MAGIC COLUMNS * EXCEPT (_operation, _sequence_num)
+-- MAGIC STORED AS SCD TYPE 1;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 AUTO CDC INTO - SCD Type 2</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Lakeflow SDP Pipeline SQL (not executable in notebooks)
+-- MAGIC -- Automatically adds __START_AT and __END_AT columns
+-- MAGIC <br/>
+-- MAGIC CREATE OR REFRESH STREAMING TABLE employee_dim_history;
+-- MAGIC <br/>
+-- MAGIC CREATE FLOW employee_history_flow
+-- MAGIC AS AUTO CDC INTO employee_dim_history
+-- MAGIC FROM STREAM(hr_harmonized.employee_cdc)
+-- MAGIC KEYS (employee_id)
+-- MAGIC APPLY AS DELETE WHEN _operation = 'DELETE'
+-- MAGIC SEQUENCE BY _sequence_num
+-- MAGIC COLUMNS * EXCEPT (_operation, _sequence_num)
+-- MAGIC STORED AS SCD TYPE 2;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">AUTO CDC Output Columns</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><code>AUTO CDC INTO</code> with <code>STORED AS SCD TYPE 2</code> automatically adds:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><code>__START_AT</code> - sequence value when the record version became valid</li>
+-- MAGIC                 <li><code>__END_AT</code> - sequence value when the record version was superseded (NULL if current)</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">The API automatically handles out-of-order events using the <code>SEQUENCE BY</code> column.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Why AUTO CDC INTO?</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><b>Out-of-order handling</b> - automatic via <code>SEQUENCE BY</code></li>
+-- MAGIC                 <li><b>SCD Type 2</b> - <code>__START_AT</code> / <code>__END_AT</code> managed automatically</li>
+-- MAGIC                 <li><b>No two-step logic</b> - single declaration replaces UPDATE + INSERT</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Sequencing Requirements</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">The <code>SEQUENCE BY</code> column must be a sortable data type representing monotonically increasing values. <code>AUTO CDC</code> automatically handles out-of-order events, but:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><code>NULL</code> sequence values are not supported</li>
+-- MAGIC                 <li>There should be one distinct update per key at each sequence value</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Handling Deletes
+-- MAGIC
+-- MAGIC Proper delete handling is critical for CDC accuracy. Both `MERGE` and `AUTO CDC INTO` support delete propagation.
+-- MAGIC
+-- MAGIC | Approach | Delete Handling | Use Case |
+-- MAGIC |----------|-----------------|----------|
+-- MAGIC | `MERGE ... WHEN MATCHED ... THEN DELETE` | Hard delete from target | SCD Type 1, no audit trail needed |
+-- MAGIC | `AUTO CDC INTO` with `APPLY AS DELETE WHEN` | Configurable per SCD type | Lakeflow SDP pipelines |
+-- MAGIC | SCD Type 1 + `APPLY AS DELETE` | Hard delete | Dimension tables without history |
+-- MAGIC | SCD Type 2 + `APPLY AS DELETE` | Soft delete (end-dated) | Full audit trail required |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 7. Monitoring CDC Events and Logs
+-- MAGIC
+-- MAGIC Validate that CDC processing maintains data integrity and meets latency SLAs.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Key CDC Metrics
+-- MAGIC
+-- MAGIC | Metric | Description | SLA Example |
+-- MAGIC |--------|-------------|-------------|
+-- MAGIC | **Event Lag** | Time between source change and target update | < 5 minutes |
+-- MAGIC | **Throughput** | Records processed per second | > 10,000 rps |
+-- MAGIC | **Error Rate** | Failed merge operations | < 0.01% |
+-- MAGIC | **Sequence Gaps** | Missing or out-of-order events | 0 |
+-- MAGIC | **Checkpoint Lag** | Offset behind latest available | < 1,000 records |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">CDC Validation Checklist</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Row counts match between source and target</li>
+-- MAGIC                 <li>Delete operations properly propagated</li>
+-- MAGIC                 <li>SCD Type 2 history records correctly end-dated</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Summary
+-- MAGIC
+-- MAGIC Oracle CDC patterns map directly to Databricks capabilities. For simple overwrites, Delta **`MERGE`** is sufficient. For complex history tracking and robust out-of-order handling, **`AUTO CDC INTO`** in Lakeflow SDP is the recommended path.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Pattern Selection
+-- MAGIC
+-- MAGIC | Pattern | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> |
+-- MAGIC |---------|-----------|------------|
+-- MAGIC | **Change capture** | Table-based CDC (or GoldenGate) | Change Data Feed or Auto Loader |
+-- MAGIC | **SCD Type 1** | `MERGE` with operation_type column | `MERGE` with operation_type column |
+-- MAGIC | **SCD Type 2** | Two-step UPDATE + INSERT | Two-step, or `AUTO CDC INTO` with SCD TYPE 2 |
+-- MAGIC | **Scheduling** | `DBMS_SCHEDULER` / external jobs | Lakeflow Jobs |
+-- MAGIC | **Out-of-order** | Manual handling | Automatic with `SEQUENCE BY` |
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### CDC Pattern Selection
+-- MAGIC
+-- MAGIC | Pattern | When to Use | Databricks Implementation |
+-- MAGIC |---------|-------------|---------------------------|
+-- MAGIC | **SCD Type 1** | Current state only, no history needed | `MERGE INTO` or `AUTO CDC INTO` with `STORED AS SCD TYPE 1` |
+-- MAGIC | **SCD Type 2** | Full history required for audit/analytics | `AUTO CDC INTO` with `STORED AS SCD TYPE 2` |
+-- MAGIC | **Hard Deletes** | Remove records from target | `WHEN MATCHED ... THEN DELETE` or `APPLY AS DELETE WHEN` with SCD TYPE 1 |
+-- MAGIC | **Soft Deletes** | Preserve deleted records with end-date | `APPLY AS DELETE WHEN` with SCD TYPE 2 |
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Conversion Checklist
+-- MAGIC
+-- MAGIC ✅ Oracle CDC tables converted to Delta Change Data Feed or streaming sources  
+-- MAGIC ✅ `MERGE` statements adapted for Delta syntax  
+-- MAGIC ✅ SCD Type 1/2 requirements implemented with `AUTO CDC INTO`  
+-- MAGIC ✅ Delete handling verified (hard vs soft deletes)  
+-- MAGIC ✅ `SEQUENCE BY` column identified for proper ordering  
+-- MAGIC ✅ Monitoring queries deployed for latency and sequencing  
+-- MAGIC ✅ SLA thresholds defined and alerting configured  
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ## References
+-- MAGIC
+-- MAGIC - [Delta `MERGE INTO` Documentation](https://docs.databricks.com/en/delta/merge.html)
+-- MAGIC - [Lakeflow Spark Declarative Pipelines CDC](https://docs.databricks.com/en/delta-live-tables/cdc.html)
+-- MAGIC - [Change Data Feed in Delta Lake](https://docs.databricks.com/en/delta/delta-change-data-feed.html)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

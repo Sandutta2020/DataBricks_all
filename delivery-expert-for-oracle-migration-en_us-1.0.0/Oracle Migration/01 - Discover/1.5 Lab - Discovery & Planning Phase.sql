@@ -1,0 +1,1565 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">01 - Discover</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="
+-- MAGIC   border-left: 4px solid #1976d2;
+-- MAGIC   background: #e3f2fd;
+-- MAGIC   padding: 14px 18px;
+-- MAGIC   border-radius: 4px;
+-- MAGIC   margin: 16px 0;
+-- MAGIC ">
+-- MAGIC   <strong style="display:block; color:#0d47a1; margin-bottom:6px; font-size: 1.1em;">
+-- MAGIC     Complete this Notebook in the Databricks Academy Provided Workspace
+-- MAGIC   </strong>
+-- MAGIC   <div style="color:#333;">
+-- MAGIC This notebook is designed to run in a Databricks Academy provided Vocareum workspace.
+-- MAGIC
+-- MAGIC Work through the notebook in sequence. Skipping steps may cause later sections to fail.
+-- MAGIC   </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Lab: Discovery & Planning Phase
+-- MAGIC
+-- MAGIC This interactive lab tests your understanding of the Discovery & Planning phase concepts. Complete the quizzes and exercises below to reinforce your learning.
+-- MAGIC
+-- MAGIC **Lab Format:** Interactive quizzes only - no code execution required.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Understanding migration drivers
+-- MAGIC - Discover data and run Oracle metadata queries
+-- MAGIC - Reason about migration strategies and workload classification
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Engagement and Alignment
+-- MAGIC
+-- MAGIC In this lesson, you learned about establishing stakeholder alignment and identifying migration drivers. Common drivers include cost optimization, platform consolidation, new AI/ML capabilities, and contract timing. Understanding these drivers guides prioritization decisions throughout the project.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 1: Identifying Migration Drivers
+-- MAGIC In this exercise, you will identify **genuine business and technical drivers** for a Oracle-to-Databricks migration, separating them from assumptions or secondary benefits to ensure migrations are grounded in clear, outcome-driven rationale.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div id="driversRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var items = [
+-- MAGIC         { id: "cost_opt", label: "Cost optimization, reduce licensing costs", correct: "valid" },
+-- MAGIC         { id: "scalability", label: "Scalability of cloud-based services", correct: "valid" },
+-- MAGIC         { id: "capex_opex", label: "Replace CapEx investments with OpEx", correct: "valid" },
+-- MAGIC         { id: "platform_consol", label: "Platform consolidation - unify ETL, analytics and ML", correct: "valid" },
+-- MAGIC         { id: "ai_ml_cap", label: "Enable AI/ML workloads and GenAI capabilities", correct: "valid" },
+-- MAGIC         { id: "contract_timing", label: "Oracle contract renewal approaching", correct: "valid" },
+-- MAGIC         { id: "support_ending", label: "Approaching End-of-Life", correct: "valid" },
+-- MAGIC         { id: "data_sharing", label: "Open format data sharing across clouds", correct: "valid" },
+-- MAGIC         { id: "competitor", label: "Competitor is using Databricks", correct: "invalid" },
+-- MAGIC         { id: "new_logo", label: "Databricks logo looks nicer", correct: "invalid" },
+-- MAGIC         { id: "resume_driven", label: "Team wants Databricks on their resume", correct: "invalid" },
+-- MAGIC         { id: "vendor_pressure", label: "Sales rep promised DBU discounts", correct: "invalid" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var buckets = {
+-- MAGIC         valid: { label: "✓ Valid Migration Drivers", color: "#4caf50", items: [] },
+-- MAGIC         invalid: { label: "✗ Not Valid Drivers", color: "#f44336", items: [] }
+-- MAGIC     };
+-- MAGIC     
+-- MAGIC     var unsorted = [];
+-- MAGIC     var showResults = false;
+-- MAGIC     var hintsUsed = 0;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         unsorted = shuffleArray(items.slice());
+-- MAGIC         buckets.valid.items = [];
+-- MAGIC         buckets.invalid.items = [];
+-- MAGIC         showResults = false;
+-- MAGIC         hintsUsed = 0;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function getItemById(id) {
+-- MAGIC         for (var i = 0; i < items.length; i++) {
+-- MAGIC             if (items[i].id === id) return items[i];
+-- MAGIC         }
+-- MAGIC         return null;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             buckets[key].items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 if (item && item.correct === key) correct++;
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function findItemToHint() {
+-- MAGIC         // First, check unsorted items
+-- MAGIC         if (unsorted.length > 0) {
+-- MAGIC             return { item: unsorted[0], source: 'unsorted' };
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         // Then, check items in wrong buckets
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             for (var i = 0; i < buckets[key].items.length; i++) {
+-- MAGIC                 var id = buckets[key].items[i];
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 if (item && item.correct !== key) {
+-- MAGIC                     return { item: item, source: key };
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return null; // Everything is correct
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function useHint() {
+-- MAGIC         var hintTarget = findItemToHint();
+-- MAGIC         if (!hintTarget) return;
+-- MAGIC         
+-- MAGIC         var item = hintTarget.item;
+-- MAGIC         var correctBucket = item.correct;
+-- MAGIC         
+-- MAGIC         // Remove from current location
+-- MAGIC         if (hintTarget.source === 'unsorted') {
+-- MAGIC             unsorted = unsorted.filter(function(i) { return i.id !== item.id; });
+-- MAGIC         } else {
+-- MAGIC             buckets[hintTarget.source].items = buckets[hintTarget.source].items.filter(function(id) { return id !== item.id; });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         // Add to correct bucket
+-- MAGIC         buckets[correctBucket].items.push(item.id);
+-- MAGIC         hintsUsed++;
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('driversRoot');
+-- MAGIC         var html = '';
+-- MAGIC         var allCorrect = countCorrect() === items.length && unsorted.length === 0;
+-- MAGIC         var canUseHint = findItemToHint() !== null;
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div>';
+-- MAGIC         html += '<div style="font-size: 1.4em; font-weight: 600; color: #333;">🎯 Identify Migration Drivers</div>';
+-- MAGIC         html += '<div style="font-size: 0.95em; color: #666; margin-top: 4px;">Drag and drop the items below to identify which are valid migration drivers and which are not.</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 10px; align-items: center;">';
+-- MAGIC         if (hintsUsed > 0) {
+-- MAGIC             html += '<span style="padding: 6px 14px; border-radius: 20px; font-size: 0.85em; background: #fff3e0; color: #e65100; font-weight: 600;">💡 Hints: ' + hintsUsed + '</span>';
+-- MAGIC         }
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === items.length ? '#e8f5e9' : '#fff3e0';
+-- MAGIC             var textColor = score === items.length ? '#2e7d32' : '#e65100';
+-- MAGIC             html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + items.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (unsorted.length > 0) {
+-- MAGIC             html += '<div style="margin-bottom: 20px; padding: 16px; background: #fff; border: 2px dashed #bbb; border-radius: 8px;">';
+-- MAGIC             html += '<div style="font-size: 0.9em; color: #666; margin-bottom: 12px; font-weight: 600;">Items to sort:</div>';
+-- MAGIC             html += '<div style="display: flex; flex-wrap: wrap; gap: 10px;">';
+-- MAGIC             unsorted.forEach(function(item) {
+-- MAGIC                 html += '<div class="sort-item" draggable="true" data-id="' + item.id + '" style="padding: 10px 16px; background: #e3f2fd; border: 2px solid #1976d2; border-radius: 6px; cursor: grab; font-size: 0.95em; color: #333; transition: all 0.15s ease;">' + item.label + '</div>';
+-- MAGIC             });
+-- MAGIC             html += '</div></div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 20px;">';
+-- MAGIC         
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             var bucket = buckets[key];
+-- MAGIC             html += '<div class="bucket" data-bucket="' + key + '" style="padding: 16px; background: #fff; border: 2px dashed ' + bucket.color + '; border-radius: 8px; min-height: 200px;">';
+-- MAGIC             html += '<div style="font-weight: 600; font-size: 1em; color: ' + bucket.color + '; margin-bottom: 12px; text-align: center; padding-bottom: 8px; border-bottom: 2px solid ' + bucket.color + ';">' + bucket.label + '</div>';
+-- MAGIC             html += '<div class="bucket-items" style="display: flex; flex-direction: column; gap: 8px;">';
+-- MAGIC             
+-- MAGIC             bucket.items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 var isCorrect = item.correct === key;
+-- MAGIC                 var itemBg = '#fff';
+-- MAGIC                 var itemBorder = bucket.color;
+-- MAGIC                 
+-- MAGIC                 if (showResults) {
+-- MAGIC                     itemBg = isCorrect ? '#e8f5e9' : '#ffebee';
+-- MAGIC                     itemBorder = isCorrect ? '#4caf50' : '#f44336';
+-- MAGIC                 }
+-- MAGIC                 
+-- MAGIC                 html += '<div class="sort-item" draggable="true" data-id="' + id + '" style="padding: 10px 14px; background: ' + itemBg + '; border: 2px solid ' + itemBorder + '; border-radius: 6px; cursor: grab; font-size: 0.9em; color: #333; display: flex; justify-content: space-between; align-items: center;">';
+-- MAGIC                 html += '<span>' + item.label + '</span>';
+-- MAGIC                 if (showResults) {
+-- MAGIC                     html += '<span>' + (isCorrect ? '✓' : '✗') + '</span>';
+-- MAGIC                 }
+-- MAGIC                 html += '</div>';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             html += '</div></div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end;">';
+-- MAGIC         html += '<button id="hintDriversBtn" style="padding: 12px 28px; background: ' + (canUseHint ? '#ff9800' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (canUseHint ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (canUseHint ? '' : ' disabled') + '>💡 Hint</button>';
+-- MAGIC         html += '<button id="checkDriversBtn" style="padding: 12px 28px; background: ' + (unsorted.length > 0 ? '#ccc' : '#4caf50') + '; color: white; border: none; border-radius: 6px; cursor: ' + (unsorted.length > 0 ? 'not-allowed' : 'pointer') + '; font-size: 1em; font-weight: 600;"' + (unsorted.length > 0 ? ' disabled' : '') + '>Check Answers</button>';
+-- MAGIC         html += '<button id="resetDriversBtn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sortItems = document.querySelectorAll('.sort-item');
+-- MAGIC         var bucketEls = document.querySelectorAll('.bucket');
+-- MAGIC         var hintBtn = document.getElementById('hintDriversBtn');
+-- MAGIC         var checkBtn = document.getElementById('checkDriversBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetDriversBtn');
+-- MAGIC         var draggedId = null;
+-- MAGIC         
+-- MAGIC         sortItems.forEach(function(item) {
+-- MAGIC             item.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedId = this.dataset.id;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedId = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         bucketEls.forEach(function(bucket) {
+-- MAGIC             bucket.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#f0f7ff';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('dragleave', function() {
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedId) {
+-- MAGIC                     var targetBucket = this.dataset.bucket;
+-- MAGIC                     unsorted = unsorted.filter(function(item) { return item.id !== draggedId; });
+-- MAGIC                     for (var key in buckets) {
+-- MAGIC                         buckets[key].items = buckets[key].items.filter(function(id) { return id !== draggedId; });
+-- MAGIC                     }
+-- MAGIC                     buckets[targetBucket].items.push(draggedId);
+-- MAGIC                     showResults = false;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         if (hintBtn) {
+-- MAGIC             hintBtn.addEventListener('click', function() {
+-- MAGIC                 useHint();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (unsorted.length === 0) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Discovery and Landscape Analysis
+-- MAGIC
+-- MAGIC In this lesson, you learned about the five discovery categories essential for a complete migration assessment: Data Assets, Pipelines & ETL, Consumers & Users, Security & Access, and Operations & SLAs. You also learned about Lakebridge for automated discovery and how to query Oracle's metadata.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 2: Discovery Categories Review
+-- MAGIC In this exercise, you will reinforce your understanding of the five discovery categories by identifying key considerations across data assets, pipelines, consumers, security, and operations that inform a complete Oracle-to-Databricks migration assessment.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div id="flashcardsRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var cards = [
+-- MAGIC         {
+-- MAGIC             id: "data_assets",
+-- MAGIC             category: "Discovery",
+-- MAGIC             front: "Data Assets",
+-- MAGIC             back: "<strong>What to Discover:</strong><br/>Tables, views, schemas<br/><br/><strong>Why It Matters:</strong><br/>Scope the data migration effort"
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             id: "pipelines",
+-- MAGIC             category: "Discovery",
+-- MAGIC             front: "Pipelines & ETL",
+-- MAGIC             back: "<strong>What to Discover:</strong><br/>PL/SQL procedures, packages<br/><br/><strong>Why It Matters:</strong><br/>Plan code conversion and testing"
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             id: "consumers",
+-- MAGIC             category: "Discovery",
+-- MAGIC             front: "Consumers & Users",
+-- MAGIC             back: "<strong>What to Discover:</strong><br/>BI tools, apps, user types, connections<br/><br/><strong>Why It Matters:</strong><br/>Coordinate downstream cutover"
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             id: "security",
+-- MAGIC             category: "Discovery",
+-- MAGIC             front: "Security & Access",
+-- MAGIC             back: "<strong>What to Discover:</strong><br/>Roles, policies, compliance requirements<br/><br/><strong>Why It Matters:</strong><br/>Replicate access controls"
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             id: "operations",
+-- MAGIC             category: "Discovery",
+-- MAGIC             front: "Operations & SLAs",
+-- MAGIC             back: "<strong>What to Discover:</strong><br/>Schedules, SLAs, monitoring, runbooks<br/><br/><strong>Why It Matters:</strong><br/>Maintain service levels"
+-- MAGIC         }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var flippedCards = {};
+-- MAGIC     var masteredCards = {};
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('flashcardsRoot');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         // Header
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div>';
+-- MAGIC         html += '<div style="font-size: 1.4em; font-weight: 600; color: #333;">📚 Discovery Categories Flashcards</div>';
+-- MAGIC         html += '<div style="font-size: 0.95em; color: #666; margin-top: 4px;">Review these flashcards covering the five discovery categories.  Click each card to flip and reveal the details.</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '<div id="masteredBadge" style="display: flex; gap: 12px; align-items: center;"></div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         // 2x2 Grid
+-- MAGIC         html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
+-- MAGIC         
+-- MAGIC         cards.forEach(function(card) {
+-- MAGIC             html += '<div class="flashcard" data-id="' + card.id + '" style="cursor: pointer; perspective: 1000px; height: 200px;">';
+-- MAGIC             
+-- MAGIC             html += '<div class="card-inner" style="position: relative; width: 100%; height: 100%; transition: transform 0.6s; transform-style: preserve-3d;">';
+-- MAGIC             
+-- MAGIC             // Front
+-- MAGIC             html += '<div class="card-front" style="position: absolute; width: 100%; height: 100%; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column;">';
+-- MAGIC             html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">';
+-- MAGIC             html += '<span class="card-status" style="color: rgba(255,255,255,0.7); font-size: 1.2em;">❓</span>';
+-- MAGIC             html += '</div>';
+-- MAGIC             html += '<div style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center;">';
+-- MAGIC             html += '<div style="font-size: 1.5em; font-weight: 700; color: white;">' + card.front + '</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             html += '<div style="text-align: center; color: rgba(255,255,255,0.7); font-size: 0.85em;">Click to flip -></div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             
+-- MAGIC             // Back
+-- MAGIC             html += '<div class="card-back" style="position: absolute; width: 100%; height: 100%; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform: rotateY(180deg); background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%); border: 3px solid #764ba2; border-radius: 12px; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column;">';
+-- MAGIC             html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">';
+-- MAGIC             html += '<span style="background: #764ba2; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.8em; font-weight: 600;">' + card.front + '</span>';
+-- MAGIC             html += '<button class="master-btn" data-id="' + card.id + '" style="padding: 4px 12px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8em; font-weight: 600;">✓ Got It!</button>';
+-- MAGIC             html += '</div>';
+-- MAGIC             html += '<div style="flex: 1; display: flex; align-items: center;">';
+-- MAGIC             html += '<div style="font-size: 0.95em; color: #333; line-height: 1.6;">' + card.back + '</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             
+-- MAGIC             html += '</div>'; // card-inner
+-- MAGIC             html += '</div>'; // flashcard
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>'; // grid
+-- MAGIC         
+-- MAGIC         // Footer
+-- MAGIC         html += '<div style="margin-top: 20px; padding-top: 16px; border-top: 2px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">';
+-- MAGIC         html += '<div style="color: #666; font-size: 0.9em;">💡 Click "Got It!" on each card when you\'ve mastered it</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 12px;">';
+-- MAGIC         html += '<button id="flipAllBtn" style="padding: 10px 20px; background: #9c27b0; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">Flip All</button>';
+-- MAGIC         html += '<button id="resetBtn" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC         updateBadge();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function updateBadge() {
+-- MAGIC         var badge = document.getElementById('masteredBadge');
+-- MAGIC         var mastered = Object.keys(masteredCards).length;
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         if (mastered > 0) {
+-- MAGIC             html += '<span style="padding: 6px 14px; border-radius: 20px; font-size: 0.85em; background: #e8f5e9; color: #2e7d32; font-weight: 600;">✓ Mastered: ' + mastered + '/' + cards.length + '</span>';
+-- MAGIC         }
+-- MAGIC         if (mastered === cards.length) {
+-- MAGIC             html += '<span style="padding: 6px 14px; border-radius: 20px; font-size: 0.85em; background: #fff3e0; color: #e65100; font-weight: 600;">🎉 Complete!</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         badge.innerHTML = html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function updateCardAppearance(cardId) {
+-- MAGIC         var cardEl = document.querySelector('.flashcard[data-id="' + cardId + '"]');
+-- MAGIC         if (!cardEl) return;
+-- MAGIC         
+-- MAGIC         var front = cardEl.querySelector('.card-front');
+-- MAGIC         var back = cardEl.querySelector('.card-back');
+-- MAGIC         var statusIcon = cardEl.querySelector('.card-status');
+-- MAGIC         var masterBtn = cardEl.querySelector('.master-btn');
+-- MAGIC         
+-- MAGIC         if (masteredCards[cardId]) {
+-- MAGIC             front.style.background = 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)';
+-- MAGIC             back.style.borderColor = '#4caf50';
+-- MAGIC             statusIcon.textContent = '✓';
+-- MAGIC             statusIcon.style.color = 'rgba(255,255,255,0.9)';
+-- MAGIC             if (masterBtn) masterBtn.style.display = 'none';
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var cardEls = document.querySelectorAll('.flashcard');
+-- MAGIC         var masterBtns = document.querySelectorAll('.master-btn');
+-- MAGIC         var flipAllBtn = document.getElementById('flipAllBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetBtn');
+-- MAGIC         
+-- MAGIC         cardEls.forEach(function(card) {
+-- MAGIC             card.addEventListener('click', function(e) {
+-- MAGIC                 if (e.target.classList.contains('master-btn')) return;
+-- MAGIC                 
+-- MAGIC                 var cardId = this.dataset.id;
+-- MAGIC                 var inner = this.querySelector('.card-inner');
+-- MAGIC                 
+-- MAGIC                 flippedCards[cardId] = !flippedCards[cardId];
+-- MAGIC                 
+-- MAGIC                 if (flippedCards[cardId]) {
+-- MAGIC                     inner.style.transform = 'rotateY(180deg)';
+-- MAGIC                 } else {
+-- MAGIC                     inner.style.transform = 'rotateY(0deg)';
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             // Hover effect
+-- MAGIC             card.addEventListener('mouseenter', function() {
+-- MAGIC                 this.querySelector('.card-inner').style.boxShadow = '0 8px 24px rgba(0,0,0,0.15)';
+-- MAGIC             });
+-- MAGIC             card.addEventListener('mouseleave', function() {
+-- MAGIC                 this.querySelector('.card-inner').style.boxShadow = 'none';
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         masterBtns.forEach(function(btn) {
+-- MAGIC             btn.addEventListener('click', function(e) {
+-- MAGIC                 e.stopPropagation();
+-- MAGIC                 var cardId = this.dataset.id;
+-- MAGIC                 masteredCards[cardId] = true;
+-- MAGIC                 updateCardAppearance(cardId);
+-- MAGIC                 updateBadge();
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         flipAllBtn.addEventListener('click', function() {
+-- MAGIC             var anyNotFlipped = cards.some(function(card) {
+-- MAGIC                 return !flippedCards[card.id];
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             var inners = document.querySelectorAll('.card-inner');
+-- MAGIC             inners.forEach(function(inner, index) {
+-- MAGIC                 var cardId = cards[index].id;
+-- MAGIC                 flippedCards[cardId] = anyNotFlipped;
+-- MAGIC                 inner.style.transform = anyNotFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)';
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             flippedCards = {};
+-- MAGIC             masteredCards = {};
+-- MAGIC             
+-- MAGIC             var inners = document.querySelectorAll('.card-inner');
+-- MAGIC             inners.forEach(function(inner) {
+-- MAGIC                 inner.style.transform = 'rotateY(0deg)';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             // Re-render to reset colors
+-- MAGIC             setTimeout(function() {
+-- MAGIC                 render();
+-- MAGIC             }, 600);
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         // Button hovers
+-- MAGIC         flipAllBtn.addEventListener('mouseenter', function() { this.style.background = '#7b1fa2'; });
+-- MAGIC         flipAllBtn.addEventListener('mouseleave', function() { this.style.background = '#9c27b0'; });
+-- MAGIC         resetBtn.addEventListener('mouseenter', function() { this.style.background = '#1565c0'; });
+-- MAGIC         resetBtn.addEventListener('mouseleave', function() { this.style.background = '#1976d2'; });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 3: Lakebridge Concepts
+-- MAGIC In this rapid-fire true/false exercise, you will validate your understanding of core Lakebridge concepts and capabilities used to accelerate Oracle-to-Databricks migrations.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div id="lakebridgeTFRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var questions = [
+-- MAGIC         {
+-- MAGIC             statement: "Lakebridge Analyzer provides automated code analysis and complexity scoring for PL/SQL.",
+-- MAGIC             answer: true,
+-- MAGIC             explanation: "Correct! Lakebridge Analyzer scans exported Oracle DDL/DML scripts and rates them as LOW, MEDIUM, or HIGH complexity."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             statement: "Lakebridge requires direct live connection to your Oracle database to perform analysis.",
+-- MAGIC             answer: false,
+-- MAGIC             explanation: "Lakebridge analyzes exported SQL files - you first export metadata from Oracle, then run the analyzer on those files locally."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             statement: "Lakebridge generates an Excel report with worksheets covering SQL Programs, Functions, and Data Types.",
+-- MAGIC             answer: true,
+-- MAGIC             explanation: "Correct! The analyzer output includes multiple worksheets: Summary, SQL Programs, SQL Script Categories, Functions, Data Types, and more."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             statement: "Lakebridge can automatically migrate your Oracle data without any manual intervention.",
+-- MAGIC             answer: false,
+-- MAGIC             explanation: "Lakebridge is an analysis and assessment tool - it helps you understand complexity and plan migration, but doesn't automatically move data."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             statement: "Lakebridge can identify Oracle-specific patterns that may need attention during migration.",
+-- MAGIC             answer: true,
+-- MAGIC             explanation: "Correct! The 'SQL Special Patterns' worksheet highlights Oracle-specific constructs that may require conversion or refactoring."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             statement: "Lakebridge is installed and run via the Databricks CLI.",
+-- MAGIC             answer: true,
+-- MAGIC             explanation: "Correct! You install Lakebridge with 'databricks labs install lakebridge' and run it with 'databricks labs lakebridge analyze'."
+-- MAGIC         }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var currentIndex = 0;
+-- MAGIC     var score = 0;
+-- MAGIC     var answered = [];
+-- MAGIC     var showingFeedback = false;
+-- MAGIC     var lastAnswer = null;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         currentIndex = 0;
+-- MAGIC         score = 0;
+-- MAGIC         answered = [];
+-- MAGIC         showingFeedback = false;
+-- MAGIC         lastAnswer = null;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('lakebridgeTFRoot');
+-- MAGIC         var html = '';
+-- MAGIC         var isComplete = currentIndex >= questions.length;
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div>';
+-- MAGIC         html += '<div style="font-size: 1.4em; font-weight: 600; color: #333;">⚡ Lakebridge: True or False?</div>';
+-- MAGIC         html += '<div style="font-size: 0.95em; color: #666; margin-top: 4px;">Test your knowledge of Lakebridge concepts</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 12px; align-items: center;">';
+-- MAGIC         html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: #e8f5e9; color: #2e7d32;">Score: ' + score + '/' + questions.length + '</span>';
+-- MAGIC         if (!isComplete) {
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">Q' + (currentIndex + 1) + '/' + questions.length + '</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         if (isComplete) {
+-- MAGIC             var percentage = Math.round(score / questions.length * 100);
+-- MAGIC             var grade = percentage >= 80 ? '🏆 Excellent!' : percentage >= 60 ? '👍 Good job!' : '📚 Keep studying!';
+-- MAGIC             
+-- MAGIC             html += '<div style="text-align: center; padding: 40px 20px;">';
+-- MAGIC             html += '<div style="font-size: 3em; margin-bottom: 16px;">' + (percentage >= 80 ? '🎉' : percentage >= 60 ? '👏' : '💪') + '</div>';
+-- MAGIC             html += '<div style="font-size: 1.8em; font-weight: 700; color: #333; margin-bottom: 8px;">' + grade + '</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; color: #666;">You scored ' + score + ' out of ' + questions.length + ' (' + percentage + '%)</div>';
+-- MAGIC             html += '<button id="restartBtn" style="margin-top: 24px; padding: 14px 32px; background: #1976d2; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1.1em; font-weight: 600;">↻ Try Again</button>';
+-- MAGIC             html += '</div>';
+-- MAGIC         } else {
+-- MAGIC             var q = questions[currentIndex];
+-- MAGIC             
+-- MAGIC             html += '<div style="background: #fff; border: 2px solid #e0e0e0; border-radius: 12px; padding: 32px; margin-bottom: 20px;">';
+-- MAGIC             html += '<div style="font-size: 1.2em; color: #333; line-height: 1.6; text-align: center; min-height: 60px;">"' + q.statement + '"</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             
+-- MAGIC             if (showingFeedback) {
+-- MAGIC                 var isCorrect = lastAnswer === q.answer;
+-- MAGIC                 var feedbackBg = isCorrect ? '#e8f5e9' : '#ffebee';
+-- MAGIC                 var feedbackBorder = isCorrect ? '#4caf50' : '#f44336';
+-- MAGIC                 var feedbackIcon = isCorrect ? '✓ Correct!' : '✗ Incorrect';
+-- MAGIC                 
+-- MAGIC                 html += '<div style="background: ' + feedbackBg + '; border: 2px solid ' + feedbackBorder + '; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">';
+-- MAGIC                 html += '<div style="font-weight: 600; color: ' + feedbackBorder + '; margin-bottom: 8px;">' + feedbackIcon + '</div>';
+-- MAGIC                 html += '<div style="color: #333; font-size: 0.95em;">' + q.explanation + '</div>';
+-- MAGIC                 html += '</div>';
+-- MAGIC                 
+-- MAGIC                 html += '<div style="text-align: center;">';
+-- MAGIC                 html += '<button id="nextBtn" style="padding: 14px 40px; background: #1976d2; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1.1em; font-weight: 600;">Next Question -></button>';
+-- MAGIC                 html += '</div>';
+-- MAGIC             } else {
+-- MAGIC                 html += '<div style="display: flex; gap: 20px; justify-content: center;">';
+-- MAGIC                 html += '<button class="answer-btn" data-answer="true" style="flex: 1; max-width: 200px; padding: 20px 32px; background: #e8f5e9; border: 3px solid #4caf50; border-radius: 12px; cursor: pointer; font-size: 1.2em; font-weight: 700; color: #2e7d32; transition: all 0.15s ease;">✓ TRUE</button>';
+-- MAGIC                 html += '<button class="answer-btn" data-answer="false" style="flex: 1; max-width: 200px; padding: 20px 32px; background: #ffebee; border: 3px solid #f44336; border-radius: 12px; cursor: pointer; font-size: 1.2em; font-weight: 700; color: #c62828; transition: all 0.15s ease;">✗ FALSE</button>';
+-- MAGIC                 html += '</div>';
+-- MAGIC             }
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var answerBtns = document.querySelectorAll('.answer-btn');
+-- MAGIC         var nextBtn = document.getElementById('nextBtn');
+-- MAGIC         var restartBtn = document.getElementById('restartBtn');
+-- MAGIC         
+-- MAGIC         answerBtns.forEach(function(btn) {
+-- MAGIC             btn.addEventListener('click', function() {
+-- MAGIC                 var answer = this.dataset.answer === 'true';
+-- MAGIC                 var q = questions[currentIndex];
+-- MAGIC                 lastAnswer = answer;
+-- MAGIC                 
+-- MAGIC                 if (answer === q.answer) {
+-- MAGIC                     score++;
+-- MAGIC                 }
+-- MAGIC                 
+-- MAGIC                 answered.push({ question: currentIndex, correct: answer === q.answer });
+-- MAGIC                 showingFeedback = true;
+-- MAGIC                 render();
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         if (nextBtn) {
+-- MAGIC             nextBtn.addEventListener('click', function() {
+-- MAGIC                 currentIndex++;
+-- MAGIC                 showingFeedback = false;
+-- MAGIC                 render();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (restartBtn) {
+-- MAGIC             restartBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 4: Inventorying Tables and Views in Oracle
+-- MAGIC Select the correct database, schema, and view to complete the query below to inventory databases, schemas, and data objects in the client's Oracle environment.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div id="sqlFill1Root"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "db", label: "database", options: ["all_objects", "information_schema", "SYSTEM"], correct: "all_objects" },
+-- MAGIC         { id: "op", label: "operation", options: ["NOT IN", "IN"], correct: "NOT IN" },
+-- MAGIC         { id: "owner", label: "owner", options: ["('SYS','SYSTEM')", "('ORACLE')", "('SYSTEM', 'ORACLE')"], correct: "('SYS','SYSTEM')" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC
+-- MAGIC         var root = document.getElementById('sqlFill1Root');
+-- MAGIC         var html = '';
+-- MAGIC
+-- MAGIC         function createDropdown(d, idx) {
+-- MAGIC             var bgColor = '#2d2d2d';
+-- MAGIC             var borderColor = '#555';
+-- MAGIC             if (showResults && selections[d.id]) {
+-- MAGIC                 bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC                 borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             html += '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: #ce9178; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC             html += '<option value="">-- select --</option>';
+-- MAGIC             d.options.forEach(function(opt) {
+-- MAGIC                 var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC                 html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC             });
+-- MAGIC             html += '</select>';
+-- MAGIC             
+-- MAGIC             if (idx < dropdowns.length - 1) {
+-- MAGIC                 html += '<span style="color: #d4d4d4;">.</span>';
+-- MAGIC             }
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: Table & View Inventory</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span> <br/>';
+-- MAGIC         html += '&nbsp;&nbsp;owner <span style="color: #569cd6;">AS</span> schema_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;<span style="color: #dcdcaa;">COUNT</span>(<span style="color: #569cd6;">CASE WHEN</span>&nbsp;';
+-- MAGIC         html += "object_type = 'TABLE'&nbsp;";
+-- MAGIC         html += '<span style="color: #dcdcaa;">THEN</span>&nbsp;1&nbsp;<span style="color: #dcdcaa;">END</span>';
+-- MAGIC         html += ') <span style="color: #569cd6;">AS</span> table_count,<br/>';
+-- MAGIC         
+-- MAGIC         html += '&nbsp;&nbsp;<span style="color: #dcdcaa;">COUNT</span>(<span style="color: #569cd6;">CASE WHEN</span>&nbsp;';
+-- MAGIC         html += "object_type = 'VIEW'&nbsp;";
+-- MAGIC         html += '<span style="color: #dcdcaa;">THEN</span>&nbsp;1&nbsp;<span style="color: #dcdcaa;">END</span>';
+-- MAGIC         html += ') <span style="color: #569cd6;">AS</span> view_count<br/>';
+-- MAGIC         
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span> ';
+-- MAGIC
+-- MAGIC         createDropdown(dropdowns[0], 0);
+-- MAGIC                 
+-- MAGIC         html += '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">WHERE</span> owner ';
+-- MAGIC         createDropdown(dropdowns[1],1);
+-- MAGIC         createDropdown(dropdowns[2],2);
+-- MAGIC         html += '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">GROUP BY</span> owner<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span> table_count <span style="color: #569cd6;">DESC</span>;';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> The <code>all_objects</code> table contains metadata about tables and views.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> The correct source is <code>all_objects</code>, which we can filter to omit system tables.';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkSql1Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetSql1Btn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         var checkBtn = document.getElementById('checkSql1Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetSql1Btn');
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 5: Discovering User Defined Functions in Oracle
+-- MAGIC Select the correct options below to gather the user defined functions in the client's Oracle environment.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div id="sqlFillFuncRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "table", label: "table", options: ["ALL_OBJECTS", "ALL_TABLES", "ALL_VIEWS"], correct: "ALL_OBJECTS" },
+-- MAGIC         { id: "col", label: "column", options: ["object_type", "object_kind", "type"], correct: "object_type" },
+-- MAGIC         { id: "func", label: "function type", options: ["'FUNCTION'", "'PROCEDURE'", "'PACKAGE'"], correct: "'FUNCTION'" }
+-- MAGIC     ];
+-- MAGIC
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('sqlFillFuncRoot');
+-- MAGIC         var html = '';
+-- MAGIC
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: User Defined Functions Inventory</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;owner <span style="color: #569cd6;">AS</span> schema_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;object_name <span style="color: #569cd6;">AS</span> function_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;created,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;last_ddl_time<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span> ';
+-- MAGIC
+-- MAGIC         // Table dropdown
+-- MAGIC         (function(d) {
+-- MAGIC             var bgColor = '#2d2d2d';
+-- MAGIC             var borderColor = '#555';
+-- MAGIC             if (showResults && selections[d.id]) {
+-- MAGIC                 bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC                 borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC             }
+-- MAGIC             html += '<select id="dropdown_func_' + d.id + '" style="background: ' + bgColor + '; color: #ce9178; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 6px 8px 6px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer; line-height: 1.5; min-height: 32px;">';
+-- MAGIC             html += '<option value="">-- select --</option>';
+-- MAGIC             d.options.forEach(function(opt) {
+-- MAGIC                 var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC                 html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC             });
+-- MAGIC             html += '</select>';
+-- MAGIC         })(dropdowns[0]);
+-- MAGIC
+-- MAGIC         html += '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">WHERE</span> ';
+-- MAGIC
+-- MAGIC         // Column dropdown
+-- MAGIC         (function(d) {
+-- MAGIC             var bgColor = '#2d2d2d';
+-- MAGIC             var borderColor = '#555';
+-- MAGIC             if (showResults && selections[d.id]) {
+-- MAGIC                 bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC                 borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC             }
+-- MAGIC             html += '<select id="dropdown_func_' + d.id + '" style="background: ' + bgColor + '; color: #ce9178; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 6px 8px 6px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer; line-height: 1.5; min-height: 32px;">';
+-- MAGIC             html += '<option value="">-- select --</option>';
+-- MAGIC             d.options.forEach(function(opt) {
+-- MAGIC                 var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC                 html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC             });
+-- MAGIC             html += '</select>';
+-- MAGIC         })(dropdowns[1]);
+-- MAGIC
+-- MAGIC         html += ' = ';
+-- MAGIC
+-- MAGIC         // Function type dropdown
+-- MAGIC         (function(d) {
+-- MAGIC             var bgColor = '#2d2d2d';
+-- MAGIC             var borderColor = '#555';
+-- MAGIC             if (showResults && selections[d.id]) {
+-- MAGIC                 bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC                 borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC             }
+-- MAGIC             html += '<select id="dropdown_func_' + d.id + '" style="background: ' + bgColor + '; color: #ce9178; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 6px 8px 6px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer; line-height: 1.5; min-height: 32px;">';
+-- MAGIC             html += '<option value="">-- select --</option>';
+-- MAGIC             d.options.forEach(function(opt) {
+-- MAGIC                 var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC                 html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC             });
+-- MAGIC             html += '</select>';
+-- MAGIC         })(dropdowns[2]);
+-- MAGIC
+-- MAGIC         html += '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span> owner, object_name;';
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> This query inventories all user-defined functions in Oracle using <code>ALL_OBJECTS</code>.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> The correct table is <code>ALL_OBJECTS</code>, column <code>object_type</code>, and value <code>\'FUNCTION\'</code>.';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkFuncBtn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetFuncBtn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_func_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC
+-- MAGIC         var checkBtn = document.getElementById('checkFuncBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetFuncBtn');
+-- MAGIC
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Planning and Road-mapping
+-- MAGIC
+-- MAGIC In this lesson, you learned about selecting migration strategies (ETL-First vs AI/BI-First), classifying workloads using T-shirt sizing, and organizing work into migration waves.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 6: Selecting a Migration Strategy
+-- MAGIC In this exercise, you will apply migration strategy concepts by choosing between ETL-First and AI/BI-First approaches based on customer drivers, target architecture, and business outcomes.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div id="strategyMcqRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var questions = [
+-- MAGIC         {
+-- MAGIC             question: "A customer's primary driver is cost reduction and they want to build a greenfield Lakehouse design. Which migration strategy is most appropriate?",
+-- MAGIC             options: [
+-- MAGIC                 { id: "a", text: "AI/BI-First - federate data immediately to unlock AI capabilities" },
+-- MAGIC                 { id: "b", text: "ETL-First - build Bronze -> Silver -> Gold layers, then migrate AI/BI" },
+-- MAGIC                 { id: "c", text: "Big Bang - migrate everything at once over a weekend" },
+-- MAGIC                 { id: "d", text: "Lift-and-Shift - copy all data without transformation" }
+-- MAGIC             ],
+-- MAGIC             correct: "b",
+-- MAGIC             explanation: "ETL-First is best for cost-driven migrations and greenfield Lakehouse designs. It allows you to build proper medallion architecture (Bronze -> Silver -> Gold) and optimize compute costs before migrating BI workloads."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             question: "A customer needs to demonstrate quick wins to secure additional budget approval, and AI/ML capabilities are a priority. Which strategy should you recommend?",
+-- MAGIC             options: [
+-- MAGIC                 { id: "a", text: "ETL-First - build complete pipelines before showing any value" },
+-- MAGIC                 { id: "b", text: "AI/BI-First - federate existing data and unlock AI capabilities quickly" },
+-- MAGIC                 { id: "c", text: "Wait until all data is migrated before enabling any AI features" },
+-- MAGIC                 { id: "d", text: "Skip migration and use Oracle for AI/ML" }
+-- MAGIC             ],
+-- MAGIC             correct: "b",
+-- MAGIC             explanation: "AI/BI-First uses Lakehouse Federation to query Oracle directly from Databricks, enabling immediate access to AI/BI capabilities like Genie and Mosaic AI without waiting for data migration. This demonstrates value quickly for budget approval."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             question: "In the AI/BI-First strategy, what technology enables Databricks to query Oracle data without moving it?",
+-- MAGIC             options: [
+-- MAGIC                 { id: "a", text: "Delta Sharing" },
+-- MAGIC                 { id: "b", text: "Lakehouse Federation" },
+-- MAGIC                 { id: "c", text: "Lakeflow Connect" },
+-- MAGIC                 { id: "d", text: "Unity Catalog Sync" }
+-- MAGIC             ],
+-- MAGIC             correct: "b",
+-- MAGIC             explanation: "Lakehouse Federation allows Databricks to query external data sources like Oracle directly without moving data. This enables the AI/BI-First strategy where you can immediately unlock AI/BI capabilities while ETL migration proceeds in parallel."
+-- MAGIC         }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var currentIndex = 0;
+-- MAGIC     var score = 0;
+-- MAGIC     var selectedAnswer = null;
+-- MAGIC     var showingFeedback = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         currentIndex = 0;
+-- MAGIC         score = 0;
+-- MAGIC         selectedAnswer = null;
+-- MAGIC         showingFeedback = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('strategyMcqRoot');
+-- MAGIC         var html = '';
+-- MAGIC         var isComplete = currentIndex >= questions.length;
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div>';
+-- MAGIC         html += '<div style="font-size: 1.4em; font-weight: 600; color: #333;">📝 Migration Strategy Quiz</div>';
+-- MAGIC         html += '<div style="font-size: 0.95em; color: #666; margin-top: 4px;">ETL-First vs AI/BI-First</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 12px; align-items: center;">';
+-- MAGIC         html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: #e8f5e9; color: #2e7d32;">Score: ' + score + '/' + questions.length + '</span>';
+-- MAGIC         if (!isComplete) {
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">Q' + (currentIndex + 1) + '/' + questions.length + '</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         if (isComplete) {
+-- MAGIC             var percentage = Math.round(score / questions.length * 100);
+-- MAGIC             html += '<div style="text-align: center; padding: 40px 20px; background: #fff; border-radius: 12px; border: 2px solid #e0e0e0;">';
+-- MAGIC             html += '<div style="font-size: 3em; margin-bottom: 16px;">' + (percentage >= 75 ? '🏆' : percentage >= 50 ? '👍' : '📚') + '</div>';
+-- MAGIC             html += '<div style="font-size: 1.8em; font-weight: 700; color: #333; margin-bottom: 8px;">Quiz Complete!</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; color: #666; margin-bottom: 24px;">You scored ' + score + ' out of ' + questions.length + ' (' + percentage + '%)</div>';
+-- MAGIC             html += '<button id="retakeMcqBtn" style="padding: 14px 32px; background: #1976d2; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1.1em; font-weight: 600;">↻ Retake Quiz</button>';
+-- MAGIC             html += '</div>';
+-- MAGIC         } else {
+-- MAGIC             var q = questions[currentIndex];
+-- MAGIC             
+-- MAGIC             html += '<div style="background: #fff; border-radius: 12px; border: 2px solid #e0e0e0; padding: 24px; margin-bottom: 20px;">';
+-- MAGIC             html += '<div style="font-size: 1.15em; color: #333; line-height: 1.6;">' + q.question + '</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             
+-- MAGIC             html += '<div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">';
+-- MAGIC             
+-- MAGIC             q.options.forEach(function(opt) {
+-- MAGIC                 var isSelected = selectedAnswer === opt.id;
+-- MAGIC                 var isCorrect = opt.id === q.correct;
+-- MAGIC                 var bgColor = '#fff';
+-- MAGIC                 var borderColor = '#e0e0e0';
+-- MAGIC                 var textColor = '#333';
+-- MAGIC                 
+-- MAGIC                 if (showingFeedback) {
+-- MAGIC                     if (isCorrect) {
+-- MAGIC                         bgColor = '#e8f5e9';
+-- MAGIC                         borderColor = '#4caf50';
+-- MAGIC                         textColor = '#2e7d32';
+-- MAGIC                     } else if (isSelected && !isCorrect) {
+-- MAGIC                         bgColor = '#ffebee';
+-- MAGIC                         borderColor = '#f44336';
+-- MAGIC                         textColor = '#c62828';
+-- MAGIC                     }
+-- MAGIC                 } else if (isSelected) {
+-- MAGIC                     bgColor = '#e3f2fd';
+-- MAGIC                     borderColor = '#1976d2';
+-- MAGIC                     textColor = '#1565c0';
+-- MAGIC                 }
+-- MAGIC                 
+-- MAGIC                 var cursor = showingFeedback ? 'default' : 'pointer';
+-- MAGIC                 
+-- MAGIC                 html += '<div class="mcq-opt" data-id="' + opt.id + '" style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; background: ' + bgColor + '; border: 2px solid ' + borderColor + '; border-radius: 8px; cursor: ' + cursor + '; transition: all 0.15s ease;">';
+-- MAGIC                 html += '<div style="width: 32px; height: 32px; border: 2px solid ' + borderColor + '; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; color: ' + textColor + '; background: ' + (isSelected || (showingFeedback && isCorrect) ? borderColor : 'transparent') + '; color: ' + (isSelected || (showingFeedback && isCorrect) ? '#fff' : textColor) + ';">' + opt.id.toUpperCase() + '</div>';
+-- MAGIC                 html += '<div style="flex: 1; font-size: 1em; color: ' + textColor + ';">' + opt.text + '</div>';
+-- MAGIC                 if (showingFeedback && isCorrect) {
+-- MAGIC                     html += '<span style="color: #4caf50; font-size: 1.2em;">✓</span>';
+-- MAGIC                 } else if (showingFeedback && isSelected && !isCorrect) {
+-- MAGIC                     html += '<span style="color: #f44336; font-size: 1.2em;">✗</span>';
+-- MAGIC                 }
+-- MAGIC                 html += '</div>';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             html += '</div>';
+-- MAGIC             
+-- MAGIC             if (showingFeedback) {
+-- MAGIC                 var isCorrect = selectedAnswer === q.correct;
+-- MAGIC                 html += '<div style="background: ' + (isCorrect ? '#e8f5e9' : '#fff3e0') + '; border: 2px solid ' + (isCorrect ? '#4caf50' : '#ff9800') + '; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">';
+-- MAGIC                 html += '<div style="font-weight: 600; color: ' + (isCorrect ? '#2e7d32' : '#e65100') + '; margin-bottom: 8px;">' + (isCorrect ? '✓ Correct!' : '✗ Not quite') + '</div>';
+-- MAGIC                 html += '<div style="color: #333; font-size: 0.95em; line-height: 1.5;">' + q.explanation + '</div>';
+-- MAGIC                 html += '</div>';
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             html += '<div style="display: flex; gap: 12px; justify-content: flex-end;">';
+-- MAGIC             if (!showingFeedback) {
+-- MAGIC                 html += '<button id="submitMcqBtn" style="padding: 12px 28px; background: ' + (selectedAnswer ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (selectedAnswer ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (selectedAnswer ? '' : ' disabled') + '>Submit Answer</button>';
+-- MAGIC             } else {
+-- MAGIC                 html += '<button id="nextMcqBtn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">' + (currentIndex < questions.length - 1 ? 'Next Question ->' : 'See Results') + '</button>';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var options = document.querySelectorAll('.mcq-opt');
+-- MAGIC         var submitBtn = document.getElementById('submitMcqBtn');
+-- MAGIC         var nextBtn = document.getElementById('nextMcqBtn');
+-- MAGIC         var retakeBtn = document.getElementById('retakeMcqBtn');
+-- MAGIC         
+-- MAGIC         options.forEach(function(opt) {
+-- MAGIC             opt.addEventListener('click', function() {
+-- MAGIC                 if (!showingFeedback) {
+-- MAGIC                     selectedAnswer = this.dataset.id;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         if (submitBtn) {
+-- MAGIC             submitBtn.addEventListener('click', function() {
+-- MAGIC                 if (selectedAnswer) {
+-- MAGIC                     if (selectedAnswer === questions[currentIndex].correct) {
+-- MAGIC                         score++;
+-- MAGIC                     }
+-- MAGIC                     showingFeedback = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (nextBtn) {
+-- MAGIC             nextBtn.addEventListener('click', function() {
+-- MAGIC                 currentIndex++;
+-- MAGIC                 selectedAnswer = null;
+-- MAGIC                 showingFeedback = false;
+-- MAGIC                 render();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (retakeBtn) {
+-- MAGIC             retakeBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 7: Sorting Workloads into Migration Waves
+-- MAGIC In this exercise, you will sort workloads or use-cases into migration waves based on complexity, dependencies, and risk.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div id="waveSortRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var items = [
+-- MAGIC         { id: "ref_tables", label: "Reference/lookup tables (country codes, product categories)", correct: "wave1" },
+-- MAGIC         { id: "mvp_pipeline", label: "MVP use case: single department dashboard", correct: "wave1" },
+-- MAGIC         { id: "simple_views", label: "Simple PL/SQL views with SELECT only", correct: "wave1" },
+-- MAGIC         { id: "fact_tables", label: "Core fact tables (orders, transactions, events)", correct: "wave2" },
+-- MAGIC         { id: "shared_dims", label: "Shared dimension tables used across teams", correct: "wave2" },
+-- MAGIC         { id: "primary_reports", label: "Data for BI reports with wide audience", correct: "wave2" },
+-- MAGIC         { id: "stored_procs", label: "Procedures with complex business logic", correct: "wave3" },
+-- MAGIC         { id: "stream_cdc", label: "GoldenGate CDC data", correct: "wave3" },
+-- MAGIC         { id: "package", label: "Complex PL/SQL packages", correct: "wave3" },
+-- MAGIC         { id: "external_funcs", label: "External functions with API dependencies", correct: "wave3" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var buckets = {
+-- MAGIC         wave1: { label: "Wave 1: Quick Wins", color: "#4caf50", items: [] },
+-- MAGIC         wave2: { label: "Wave 2: Core Data", color: "#ff9800", items: [] },
+-- MAGIC         wave3: { label: "Wave 3: Complex Workloads", color: "#f44336", items: [] }
+-- MAGIC     };
+-- MAGIC     
+-- MAGIC     var unsorted = [];
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         unsorted = shuffleArray(items.slice());
+-- MAGIC         buckets.wave1.items = [];
+-- MAGIC         buckets.wave2.items = [];
+-- MAGIC         buckets.wave3.items = [];
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function getItemById(id) {
+-- MAGIC         for (var i = 0; i < items.length; i++) {
+-- MAGIC             if (items[i].id === id) return items[i];
+-- MAGIC         }
+-- MAGIC         return null;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             buckets[key].items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 if (item && item.correct === key) correct++;
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('waveSortRoot');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div>';
+-- MAGIC         html += '<div style="font-size: 1.4em; font-weight: 600; color: #333;">📂 Sort Workloads into Migration Waves</div>';
+-- MAGIC         html += '<div style="font-size: 0.95em; color: #666; margin-top: 4px;">Drag each workload into the appropriate wave based on complexity and risk</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === items.length ? '#e8f5e9' : '#fff3e0';
+-- MAGIC             var textColor = score === items.length ? '#2e7d32' : '#e65100';
+-- MAGIC             html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + items.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (unsorted.length > 0) {
+-- MAGIC             html += '<div style="margin-bottom: 20px; padding: 16px; background: #fff; border: 2px dashed #bbb; border-radius: 8px;">';
+-- MAGIC             html += '<div style="font-size: 0.9em; color: #666; margin-bottom: 12px; font-weight: 600;">Workloads to sort:</div>';
+-- MAGIC             html += '<div style="display: flex; flex-wrap: wrap; gap: 10px;">';
+-- MAGIC             unsorted.forEach(function(item) {
+-- MAGIC                 html += '<div class="wave-item" draggable="true" data-id="' + item.id + '" style="padding: 10px 16px; background: #e3f2fd; border: 2px solid #1976d2; border-radius: 6px; cursor: grab; font-size: 0.9em; color: #333; transition: all 0.15s ease;">' + item.label + '</div>';
+-- MAGIC             });
+-- MAGIC             html += '</div></div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px;">';
+-- MAGIC         
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             var bucket = buckets[key];
+-- MAGIC             html += '<div class="wave-bucket" data-bucket="' + key + '" style="padding: 16px; background: #fff; border: 2px dashed ' + bucket.color + '; border-radius: 8px; min-height: 220px;">';
+-- MAGIC             html += '<div style="font-weight: 600; font-size: 1em; color: ' + bucket.color + '; margin-bottom: 12px; text-align: center; padding-bottom: 8px; border-bottom: 2px solid ' + bucket.color + ';">' + bucket.label + '</div>';
+-- MAGIC             html += '<div class="bucket-items" style="display: flex; flex-direction: column; gap: 8px;">';
+-- MAGIC             
+-- MAGIC             bucket.items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 var isCorrect = item.correct === key;
+-- MAGIC                 var itemBg = '#fff';
+-- MAGIC                 var itemBorder = bucket.color;
+-- MAGIC                 
+-- MAGIC                 if (showResults) {
+-- MAGIC                     itemBg = isCorrect ? '#e8f5e9' : '#ffebee';
+-- MAGIC                     itemBorder = isCorrect ? '#4caf50' : '#f44336';
+-- MAGIC                 }
+-- MAGIC                 
+-- MAGIC                 html += '<div class="wave-item" draggable="true" data-id="' + id + '" style="padding: 8px 12px; background: ' + itemBg + '; border: 2px solid ' + itemBorder + '; border-radius: 6px; cursor: grab; font-size: 0.85em; color: #333; display: flex; justify-content: space-between; align-items: center;">';
+-- MAGIC                 html += '<span>' + item.label + '</span>';
+-- MAGIC                 if (showResults) {
+-- MAGIC                     html += '<span style="margin-left: 8px;">' + (isCorrect ? '✓' : '✗') + '</span>';
+-- MAGIC                 }
+-- MAGIC                 html += '</div>';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             html += '</div></div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end;">';
+-- MAGIC         html += '<button id="checkWaveBtn" style="padding: 12px 28px; background: ' + (unsorted.length > 0 ? '#ccc' : '#4caf50') + '; color: white; border: none; border-radius: 6px; cursor: ' + (unsorted.length > 0 ? 'not-allowed' : 'pointer') + '; font-size: 1em; font-weight: 600;"' + (unsorted.length > 0 ? ' disabled' : '') + '>Check Answers</button>';
+-- MAGIC         html += '<button id="resetWaveBtn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var waveItems = document.querySelectorAll('.wave-item');
+-- MAGIC         var bucketEls = document.querySelectorAll('.wave-bucket');
+-- MAGIC         var checkBtn = document.getElementById('checkWaveBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetWaveBtn');
+-- MAGIC         var draggedId = null;
+-- MAGIC         
+-- MAGIC         waveItems.forEach(function(item) {
+-- MAGIC             item.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedId = this.dataset.id;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedId = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         bucketEls.forEach(function(bucket) {
+-- MAGIC             bucket.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#f0f7ff';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('dragleave', function() {
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedId) {
+-- MAGIC                     var targetBucket = this.dataset.bucket;
+-- MAGIC                     unsorted = unsorted.filter(function(item) { return item.id !== draggedId; });
+-- MAGIC                     for (var key in buckets) {
+-- MAGIC                         buckets[key].items = buckets[key].items.filter(function(id) { return id !== draggedId; });
+-- MAGIC                     }
+-- MAGIC                     buckets[targetBucket].items.push(draggedId);
+-- MAGIC                     showResults = false;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (unsorted.length === 0) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 🎉 Lab Complete!
+-- MAGIC
+-- MAGIC You've completed the Discovery & Planning Phase lab. You should now be able to:
+-- MAGIC
+-- MAGIC ✅ Identify valid migration drivers for stakeholder alignment  
+-- MAGIC ✅ Recall the five discovery categories essential for migration assessment  
+-- MAGIC ✅ Understand Lakebridge capabilities for automated analysis  
+-- MAGIC ✅ Know how to query Oracle metadata for discovery  
+-- MAGIC ✅ Select appropriate migration strategies (ETL-First vs AI/BI-First)  
+-- MAGIC ✅ Classify workloads into migration waves based on complexity  
+-- MAGIC
+-- MAGIC **Next Steps:** Continue to the Design phase to learn about target architecture and platform setup.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

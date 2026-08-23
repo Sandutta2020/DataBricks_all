@@ -1,0 +1,728 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">05 - Enable</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Platform Operations and Cost Management
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC With migration complete, this lesson focuses on operationalizing your Databricks environment for sustainable, cost-effective production use. You'll implement tagging strategies, right-size compute, configure budget controls, and establish governance practices.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Implement tagging strategies for cost attribution and chargeback
+-- MAGIC - Right-size SQL Warehouses based on workload analysis
+-- MAGIC - Configure budget alerts at account and workspace levels
+-- MAGIC - Choose between Serverless and Provisioned compute
+-- MAGIC - Query system tables to identify optimization opportunities
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 1. Cost Management Architecture
+-- MAGIC
+-- MAGIC Effective cost management requires visibility, attribution, and control across all compute and storage resources.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph Resources["Compute Resources"]
+-- MAGIC         WH[SQL Warehouses]
+-- MAGIC         CL[Clusters]
+-- MAGIC         JB[Jobs]
+-- MAGIC     end
+-- MAGIC     subgraph Governance["Governance Layer"]
+-- MAGIC         TG[Resource Tags]
+-- MAGIC         CP[Cluster Policies]
+-- MAGIC     end
+-- MAGIC     subgraph Observability["Observability"]
+-- MAGIC         ST[(system.billing.usage)]
+-- MAGIC         DB[Cost Dashboard]
+-- MAGIC     end
+-- MAGIC     Resources --> ST
+-- MAGIC     TG --> ST
+-- MAGIC     CP --> Resources
+-- MAGIC     ST --> DB
+-- MAGIC     style Resources fill:#E8F4FD,stroke:#5A9BD5
+-- MAGIC     style Governance fill:#E5F5F3,stroke:#5BA8A0
+-- MAGIC     style Observability fill:#FFF8E6,stroke:#E6AC00
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <script type="module">
+-- MAGIC import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+-- MAGIC mermaid.initialize({ startOnLoad: true, theme: "default" });
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 2. Understanding the Cost Model
+-- MAGIC
+-- MAGIC Oracle licensing and Databricks pricing are structured very differently. Oracle uses upfront perpetual or subscription licenses tied to processor count or named users; Databricks bills on consumption via DBUs.
+-- MAGIC
+-- MAGIC | <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="18" height="18" style="vertical-align: middle;" /> Oracle | <img src="https://cdn.simpleicons.org/databricks/FF3621" width="18" style="vertical-align: middle;"> Databricks | Notes |
+-- MAGIC |-----------|------------|-------|
+-- MAGIC | CPU/Named-User Plus licenses + annual support | DBUs (Databricks Units) | Fundamentally different models: upfront vs. consumption |
+-- MAGIC | Exadata / RAC hardware tiers | Warehouse size + SKU type | Different SKUs have different DBU rates |
+-- MAGIC | Annual support (22% of license cost) | Pay-per-second billing | Oracle support is fixed; Databricks scales with use |
+-- MAGIC | Always-on instance (no auto-suspend) | Auto-stop | Oracle databases run continuously; Databricks warehouses idle-off |
+-- MAGIC | Oracle RAC (Real Application Clusters) | Auto-scaling clusters | Both provide horizontal compute scaling |
+-- MAGIC | Database Resource Manager (DBRM) | Budgets + Alerts | Databricks budgets are informational (no auto-suspend) |
+-- MAGIC | ASM / tablespace storage | Cloud provider storage (S3/ADLS/GCS) | Oracle storage is managed by DBAs; Databricks via cloud provider |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Oracle License Cost Drivers
+-- MAGIC
+-- MAGIC Before optimizing Databricks costs, document your Oracle TCO across all cost dimensions:
+-- MAGIC
+-- MAGIC | Cost Category | Oracle | Notes |
+-- MAGIC |---------------|--------|-------|
+-- MAGIC | **Database licenses** | Standard Edition 2 / Enterprise Edition per processor | EE is ~$47K/processor; SE2 ~$17K/processor |
+-- MAGIC | **Options & Packs** | RAC, Partitioning, Advanced Security, Diagnostics, Tuning | Each option adds 23-100% of base license cost |
+-- MAGIC | **Annual support** | ~22% of license net cost | Paid annually regardless of usage |
+-- MAGIC | **Infrastructure** | On-prem hardware or cloud (OCI, AWS RDS, Azure) | Includes compute, storage, networking |
+-- MAGIC | **Operational overhead** | DBA staffing, patching, tuning | Often underestimated in TCO models |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Extracting Your Oracle Cost Baseline
+-- MAGIC
+-- MAGIC Before optimizing Databricks costs, understand your current Oracle resource consumption patterns. Run these queries against your Oracle Database to gather baseline data for comparison and chargeback model design.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: CPU and I/O usage by schema/module (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Top CPU consumers by schema and module (from AWR - requires Diagnostics Pack)
+-- MAGIC SELECT
+-- MAGIC     s.parsing_schema_name AS schema_name,
+-- MAGIC     NVL(s.module, 'untagged') AS application_module,
+-- MAGIC     TRUNC(s.last_active_time, 'MM') AS usage_month,
+-- MAGIC     COUNT(DISTINCT s.sql_id) AS unique_queries,
+-- MAGIC     SUM(s.executions_delta) AS total_executions,
+-- MAGIC     ROUND(SUM(s.cpu_time_delta) / 1e6, 2) AS total_cpu_sec,
+-- MAGIC     ROUND(SUM(s.elapsed_time_delta) / 1e6, 2) AS total_elapsed_sec,
+-- MAGIC     ROUND(SUM(s.disk_reads_delta), 0) AS total_disk_reads
+-- MAGIC FROM dba_hist_sqlstat s
+-- MAGIC WHERE s.last_active_time >= ADD_MONTHS(SYSDATE, -6)
+-- MAGIC GROUP BY
+-- MAGIC     s.parsing_schema_name,
+-- MAGIC     NVL(s.module, 'untagged'),
+-- MAGIC     TRUNC(s.last_active_time, 'MM')
+-- MAGIC ORDER BY usage_month DESC, total_cpu_sec DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Storage usage by schema/tablespace (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Storage consumption by owner (schema) and tablespace
+-- MAGIC SELECT
+-- MAGIC     s.owner AS schema_name,
+-- MAGIC     s.tablespace_name,
+-- MAGIC     s.segment_type,
+-- MAGIC     ROUND(SUM(s.bytes) / POWER(1024, 3), 2) AS size_gb,
+-- MAGIC     COUNT(*) AS segment_count
+-- MAGIC FROM dba_segments s
+-- MAGIC WHERE s.owner NOT IN ('SYS', 'SYSTEM', 'DBSNMP', 'OUTLN', 'MDSYS', 'ORDSYS', 'XDB')
+-- MAGIC GROUP BY s.owner, s.tablespace_name, s.segment_type
+-- MAGIC ORDER BY size_gb DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Active session history - workload by hour (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Workload profile by hour of day (requires Diagnostics Pack)
+-- MAGIC SELECT
+-- MAGIC     TO_CHAR(sample_time, 'DY HH24') AS day_hour,
+-- MAGIC     NVL(program, 'unknown') AS application,
+-- MAGIC     COUNT(*) AS active_session_samples,
+-- MAGIC     ROUND(COUNT(*) / 3600.0, 4) AS avg_active_sessions
+-- MAGIC FROM dba_hist_active_sess_history
+-- MAGIC WHERE sample_time >= SYSDATE - 30
+-- MAGIC   AND session_type = 'FOREGROUND'
+-- MAGIC GROUP BY TO_CHAR(sample_time, 'DY HH24'), NVL(program, 'unknown')
+-- MAGIC ORDER BY active_session_samples DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 3. Tagging Strategy for Cost Attribution
+-- MAGIC
+-- MAGIC Tags enable cost attribution, chargeback, and governance. Implement a consistent schema across all resources.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Recommended Tag Schema
+-- MAGIC
+-- MAGIC | Tag Key | Purpose | Example Values |
+-- MAGIC |---------|---------|----------------|
+-- MAGIC | `team` | Team ownership | `data-engineering`, `analytics`, `ml-ops` |
+-- MAGIC | `project` | Project tracking | `hr-migration-migration`, `customer-360` |
+-- MAGIC | `environment` | Environment ID | `dev`, `staging`, `prod` |
+-- MAGIC | `cost-center` | Finance code | `CC-1001`, `CC-2045` |
+-- MAGIC | `workload` | Workload type | `etl`, `bi`, `ml-training`, `ad-hoc` |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Enforce Tagging with Cluster Policies</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Use cluster policies to require specific tags on all compute resources. This prevents untagged resources and ensures complete cost attribution.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Cluster Policies for Cost Governance
+-- MAGIC
+-- MAGIC Cluster policies enforce guardrails on **all-purpose clusters** and **job compute** creation (not SQL Warehouses). Define policies via the Account Console UI, CLI, or SDK.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Example: Cost-controlled cluster policy (JSON)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="json">
+-- MAGIC {
+-- MAGIC   "cluster_type": {
+-- MAGIC     "type": "fixed",
+-- MAGIC     "value": "all-purpose"
+-- MAGIC   },
+-- MAGIC   "dbus_per_hour": {
+-- MAGIC     "type": "range",
+-- MAGIC     "maxValue": 50
+-- MAGIC   },
+-- MAGIC   "autotermination_minutes": {
+-- MAGIC     "type": "range",
+-- MAGIC     "minValue": 10,
+-- MAGIC     "maxValue": 60,
+-- MAGIC     "defaultValue": 20
+-- MAGIC   },
+-- MAGIC   "custom_tags.team": {
+-- MAGIC     "type": "unlimited"
+-- MAGIC   },
+-- MAGIC   "custom_tags.cost-center": {
+-- MAGIC     "type": "regex",
+-- MAGIC     "pattern": "CC-[0-9]{4}(-[A-Z]+)?"
+-- MAGIC   },
+-- MAGIC   "node_type_id": {
+-- MAGIC     "type": "allowlist",
+-- MAGIC     "values": [
+-- MAGIC       "i3.xlarge",
+-- MAGIC       "i3.2xlarge",
+-- MAGIC       "i3.4xlarge"
+-- MAGIC     ],
+-- MAGIC     "defaultValue": "i3.xlarge"
+-- MAGIC   },
+-- MAGIC   "num_workers": {
+-- MAGIC     "type": "range",
+-- MAGIC     "minValue": 1,
+-- MAGIC     "maxValue": 10,
+-- MAGIC     "defaultValue": 2
+-- MAGIC   },
+-- MAGIC   "spark_version": {
+-- MAGIC     "type": "fixed",
+-- MAGIC     "value": "auto:latest-lts",
+-- MAGIC     "hidden": true
+-- MAGIC   }
+-- MAGIC }
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Applying Tags via Declarative Automation Bundles
+-- MAGIC
+-- MAGIC Tags should be defined in your Declarative Automation Bundle configuration for consistent, version-controlled application. Note that different resource types use different attribute names for tags:
+-- MAGIC
+-- MAGIC | Resource Type | Tag Attribute |
+-- MAGIC |---------------|---------------|
+-- MAGIC | Jobs | `tags` |
+-- MAGIC | Clusters | `custom_tags` |
+-- MAGIC | Pipelines | `tags` |
+-- MAGIC | SQL Warehouses | `tags` |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 databricks.yml: Tagged resource definitions</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC bundle:
+-- MAGIC   name: hr-migration-platform
+-- MAGIC
+-- MAGIC variables:
+-- MAGIC   environment:
+-- MAGIC     default: dev
+-- MAGIC   team:
+-- MAGIC     default: data-engineering
+-- MAGIC   cost_center:
+-- MAGIC     default: CC-1001
+-- MAGIC
+-- MAGIC resources:
+-- MAGIC   jobs:
+-- MAGIC     daily_hr_etl:
+-- MAGIC       name: "[${bundle.target}] Daily HR ETL"
+-- MAGIC       tags:
+-- MAGIC         team: ${var.team}
+-- MAGIC         project: hr-migration
+-- MAGIC         environment: ${var.environment}
+-- MAGIC         cost-center: ${var.cost_center}
+-- MAGIC         workload: etl
+-- MAGIC       tasks:
+-- MAGIC         - task_key: extract_employees
+-- MAGIC           notebook_task:
+-- MAGIC             notebook_path: ./notebooks/extract_employees.py
+-- MAGIC
+-- MAGIC   clusters:
+-- MAGIC     shared_analytics:
+-- MAGIC       cluster_name: "[${bundle.target}] Shared Analytics"
+-- MAGIC       spark_version: "15.4.x-scala2.12"
+-- MAGIC       node_type_id: "i3.xlarge"
+-- MAGIC       num_workers: 2
+-- MAGIC       autotermination_minutes: 30
+-- MAGIC       custom_tags:
+-- MAGIC         team: ${var.team}
+-- MAGIC         project: hr-migration
+-- MAGIC         environment: ${var.environment}
+-- MAGIC         cost-center: ${var.cost_center}
+-- MAGIC         workload: ad-hoc
+-- MAGIC
+-- MAGIC   pipelines:
+-- MAGIC     hr_pipeline:
+-- MAGIC       name: "[${bundle.target}] HR Pipeline"
+-- MAGIC       tags:
+-- MAGIC         team: ${var.team}
+-- MAGIC         environment: ${var.environment}
+-- MAGIC         cost-center: ${var.cost_center}
+-- MAGIC       libraries:
+-- MAGIC         - notebook:
+-- MAGIC             path: ./pipelines/hr_pipeline.py
+-- MAGIC
+-- MAGIC targets:
+-- MAGIC   dev:
+-- MAGIC     variables:
+-- MAGIC       environment: dev
+-- MAGIC       cost_center: CC-1001-DEV
+-- MAGIC   
+-- MAGIC   prod:
+-- MAGIC     variables:
+-- MAGIC       environment: prod
+-- MAGIC       cost_center: CC-1001-PROD
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 4. Right-Sizing Compute Resources
+-- MAGIC
+-- MAGIC Over-provisioned compute is the primary driver of unnecessary costs. Databricks recommends **serverless compute for most workloads** as it requires no configuration, is always available, and scales automatically.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### SQL Warehouse Sizing (Serverless)
+-- MAGIC
+-- MAGIC Serverless SQL warehouses use Intelligent Workload Management (IWM) to automatically manage query workloads. IWM uses ML models to predict resource requirements, manage queue wait times, and scale clusters up/down dynamically.
+-- MAGIC
+-- MAGIC **Sizing guidelines:**
+-- MAGIC
+-- MAGIC - Start with a **single larger warehouse** and let serverless features manage concurrency - it's easier to size down than scale up
+-- MAGIC - If queries are **spilling to disk**, increase the cluster size (check the query profile)
+-- MAGIC - For high concurrency, configure sufficient **maximum clusters** to handle peak loads
+-- MAGIC - Monitor **Peak Queued Queries** on the warehouse monitoring page - consistent values above 0 indicate you need more capacity
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### SQL Warehouse Sizing (Pro/Classic)
+-- MAGIC
+-- MAGIC Pro and classic warehouses use manual scaling with a fixed limit of one cluster per 10 concurrent queries.
+-- MAGIC
+-- MAGIC | Cluster Size | Driver Instance | Worker Count |
+-- MAGIC |--------------|-----------------|--------------|
+-- MAGIC | 2X-Small | i3.2xlarge | 1 |
+-- MAGIC | X-Small | i3.2xlarge | 2 |
+-- MAGIC | Small | i3.4xlarge | 4 |
+-- MAGIC | Medium | i3.8xlarge | 8 |
+-- MAGIC | Large | i3.8xlarge | 16 |
+-- MAGIC | X-Large | i3.16xlarge | 32 |
+-- MAGIC | 2X-Large | i3.16xlarge | 64 |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Serverless vs Provisioned
+-- MAGIC
+-- MAGIC | Factor | Serverless | Provisioned |
+-- MAGIC |--------|------------|-------------|
+-- MAGIC | **Startup time** | Instant (warm pools) | 2-5 minutes |
+-- MAGIC | **Cost model** | Pay per query second | Pay while running |
+-- MAGIC | **Best for** | Variable/spiky workloads | Steady 8+ hrs/day |
+-- MAGIC | **Idle cost** | Zero | Continues until auto-stop |
+-- MAGIC | **Management** | Automatic (IWM) | Manual cluster config |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### All-Purpose Cluster Sizing by Workload
+-- MAGIC
+-- MAGIC | Workload Type | Recommendation |
+-- MAGIC |---------------|----------------|
+-- MAGIC | **Data Analysis** | Single-node with large VM. Storage-optimized instances with disk cache. Enable auto-termination and consider autoscaling. |
+-- MAGIC | **Basic Batch ETL** | Lower memory/storage instances. Simple jobs without wide transformations can use smaller workers. |
+-- MAGIC | **Complex Batch ETL** | Fewer workers with larger instances to reduce shuffle overhead. Increase memory if you see spill to disk or OOM errors. Consider using pools for faster launch times. |
+-- MAGIC | **ML Training** | Personal compute policy. Start single-node for experimentation. Storage-optimized with disk cache for repeated data reads. Avoid too many workers due to shuffle overhead. |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Access Modes for Unity Catalog
+-- MAGIC
+-- MAGIC | Mode | Use Case |
+-- MAGIC |------|----------|
+-- MAGIC | **Standard** | Default for most workloads. Shared by multiple users with isolation and fine-grained access control. |
+-- MAGIC | **Dedicated** | Required for RDD APIs, GPU instances, R, or Databricks Container Service. |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Photon Assessment
+-- MAGIC
+-- MAGIC Photon is most beneficial for SQL workloads and DataFrame operations with complex transformations (joins, aggregations, large table scans). Workloads with frequent disk access, wide tables, or repeated data processing see the best improvements.
+-- MAGIC
+-- MAGIC Simple batch ETL without wide transformations or queries completing in under 2 seconds may see minimal impact from Photon.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Compute Recommendations</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><strong>Default to Serverless</strong> for notebooks, jobs, and SQL warehouses where supported</li>
+-- MAGIC                 <li><strong>Use compute policies</strong> to enforce guardrails - contact your workspace admin if you don't have access</li>
+-- MAGIC                 <li>Only provision classic/pro compute if you need features not available on serverless</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 5. Budget Controls and Alerts
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Configure Budget Alerts Before Production</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Budget alerts are configured in the <strong>Account Console -> Budgets</strong>. Create budgets for each cost center and set alert thresholds at 50%, 75%, and 90% of expected monthly spend. Unlike Oracle Resource Monitors, Databricks budgets do not automatically suspend compute.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Workspace-Level Budget Tracking
+-- MAGIC
+-- MAGIC You can create budget tracking queries directly in your workspace using literal values for budget targets. This approach works well as a DBSQL query powering AI/BI Dashboard visualizations—for example, Counter widgets showing each team's percentage consumed against their budget.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Account-Level Budget Tracking and Management
+-- MAGIC
+-- MAGIC For centralized budget management across all workspaces, use the Account Console. Navigate to  **Usage** in the Databricks Account Console.
+-- MAGIC
+-- MAGIC **Account Usage Dashboards**
+-- MAGIC
+-- MAGIC From the **Consumption** tab, you can deploy a pre-built Account Usage Dashboard to any workspace. This dashboard provides visibility across all workspaces in your account, showing usage trends grouped by billing origin product (ALL_PURPOSE, SQL, Lakeflow SDP, etc.).
+-- MAGIC
+-- MAGIC Use this for executive reporting or to identify cost drivers across your organization.
+-- MAGIC <br/>
+-- MAGIC <br/>
+-- MAGIC
+-- MAGIC <img src="../assets/images/account-usage.png" alt="Account Usage" />
+-- MAGIC
+-- MAGIC Click **Visit new dashboard** to deploy the dashboard to a workspace of your choice. The resulting dashboard can be filtered by date range, workspace, and tag.
+-- MAGIC <br />
+-- MAGIC <br />
+-- MAGIC
+-- MAGIC <img src="../assets/images/account-usage-dashboard.png" alt="Account Usage" />
+-- MAGIC
+-- MAGIC **Creating Account Level Budget Tracking and Alerts**  
+-- MAGIC   
+-- MAGIC Budgets can be scoped to specific workspaces or tags, and you can configure email alerts at multiple thresholds (e.g., 50%, 75%, 90%). Remember that these alerts are informational only - they notify you but do not automatically suspend compute.
+-- MAGIC
+-- MAGIC <br/>
+-- MAGIC <img src="../assets/images/accounts-create-budget.png" alt="Account Usage" />
+-- MAGIC <br />
+-- MAGIC <br />
+-- MAGIC
+-- MAGIC <img src="../assets/images/accounts-budgets.png" alt="Account Usage" />
+-- MAGIC
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Cost Optimization Quick Wins
+-- MAGIC
+-- MAGIC | Strategy | Implementation | Expected Savings |
+-- MAGIC |----------|----------------|------------------|
+-- MAGIC | **Aggressive auto-stop** | Set to 5-10 min for dev/test | 30-50% on idle time |
+-- MAGIC | **Right-size warehouses** | Start small, scale based on queue times | 20-40% |
+-- MAGIC | **Use Serverless** | Default for variable workloads | Pay only for active queries |
+-- MAGIC | **Enforce tagging** | Cluster policies requiring tags | Enables accountability |
+-- MAGIC | **Spot instances for jobs** | Use spot for fault-tolerant batch | 60-80% on job compute |
+-- MAGIC | **Photon acceleration** | Enable for SQL and Spark SQL | 2-3x faster = fewer DBUs |
+-- MAGIC | **Liquid Clustering** | Replace partitioning | Reduced scan costs |
+-- MAGIC | **Predictive Optimization** | Enabled at the Metastore (typically), Catalog or Schema level with inheritence | Improved performance, lower maintenance requirements |
+-- MAGIC | **Review interactive clusters** | Audit personal clusters monthly | Eliminate zombie clusters |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Predictive Optimization
+-- MAGIC
+-- MAGIC Predictive optimization automatically runs `OPTIMIZE`, `VACUUM`, and `ANALYZE` operations on **Unity Catalog managed tables only**. It uses serverless compute (billed separately) to identify and maintain tables that would benefit from these operations.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Predictive Optimization Scope</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><strong>Managed tables only</strong> - external tables and Delta Sharing tables are not supported</li>
+-- MAGIC                 <li><strong>Enabled by default</strong> for accounts created after November 11, 2024</li>
+-- MAGIC                 <li><strong>Inheritance model</strong> - enable at account, catalog, or schema level; tables inherit from parent</li>
+-- MAGIC                 <li><strong>Serverless billing</strong> - operations run on serverless compute using the jobs SKU</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Platform Operations Checklist</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Tagging strategy defined and documented</li>
+-- MAGIC                 <li>Cluster policies enforce required tags</li>
+-- MAGIC                 <li>SQL Warehouses sized based on workload analysis</li>
+-- MAGIC                 <li>Auto-stop configured on all compute resources</li>
+-- MAGIC                 <li>Budget alerts configured in Account Console</li>
+-- MAGIC                 <li>Cost attribution dashboard deployed</li>
+-- MAGIC                 <li>Predictive optimization enabled on production tables</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Summary
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle Concept</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks Equivalent</span> | Configuration |
+-- MAGIC |-------------------|----------------------|---------------|
+-- MAGIC | Database Resource Manager (DBRM) | Budget + Alerts | Account Console |
+-- MAGIC | Schema/module tagging | Custom tags | Declarative Automation Bundles, Cluster Policies |
+-- MAGIC | License & infrastructure cost | DBU billing by tag | `system.billing.usage` |
+-- MAGIC | Always-on instance | Auto-stop | Warehouse/Cluster config |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### References
+-- MAGIC
+-- MAGIC - [Databricks Billing Documentation](https://docs.databricks.com/aws/en/admin/account-settings/account)
+-- MAGIC - [System Tables for Billing](https://docs.databricks.com/en/admin/system-tables/billing.html)
+-- MAGIC - [Cluster Policies](https://docs.databricks.com/en/admin/clusters/policies.html)
+-- MAGIC - [SQL Warehouse Best Practices](https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

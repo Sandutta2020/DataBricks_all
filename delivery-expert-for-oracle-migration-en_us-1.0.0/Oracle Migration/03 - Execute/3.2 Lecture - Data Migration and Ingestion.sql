@@ -1,0 +1,451 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">03 - Execute</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Data Migration and Ingestion
+-- MAGIC
+-- MAGIC This lesson covers the practical work of moving data from Oracle to Databricks. You will export data from Oracle, land it in cloud storage, and ingest it into Delta tables using Auto Loader and **`COPY INTO`**.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC - Export Oracle tables to Parquet or CSV using **`DBMS_CLOUD.EXPORT_DATA`** 
+-- MAGIC - Ingest exported data into Delta Bronze tables via Auto Loader
+-- MAGIC - Use the Lakehouse Federation for direct table migration
+-- MAGIC - Define partitioning and clustering strategies for migrated HR tables
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC            
+-- MAGIC ## 1. Migration Patterns
+-- MAGIC
+-- MAGIC Choose your migration pattern based on data volume, network topology, downtime tolerance, and cloud provider.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph OR["Oracle"]
+-- MAGIC         TBL["Tables"]
+-- MAGIC     end
+-- MAGIC     subgraph CLOUD["Cloud Storage"]
+-- MAGIC         S3["S3 / ADLS / GCS"]
+-- MAGIC     end
+-- MAGIC     subgraph DB["Databricks"]
+-- MAGIC         BRONZE["Bronze<br/>Delta Tables"]
+-- MAGIC     end
+-- MAGIC     TBL -->|"DBMS_CLOUD.<br/>EXPORT_DATA"| S3
+-- MAGIC     TBL -->|"ADF / AWS DMS /<br/>Manual export"| S3
+-- MAGIC     TBL -->|"Lakehouse Federation /<br/>Spark JDBC"| BRONZE
+-- MAGIC     TBL -->|"3rd Party Tools<br/>(Fivetran, Qlik, etc.)"| BRONZE
+-- MAGIC     S3 -->|"Auto Loader /<br/>COPY INTO"| BRONZE
+-- MAGIC     style OR fill:#fff,stroke:#F80102,stroke-width:2px
+-- MAGIC     style CLOUD fill:#fff,stroke:#607d8b,stroke-width:2px
+-- MAGIC     style DB fill:#fff,stroke:#FF3621,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC    
+-- MAGIC | Pattern | Best For | Pros | Cons |
+-- MAGIC |---------|----------|------|------|
+-- MAGIC | **Lakehouse Federation** | Small/medium tables, ongoing access | Direct transfer, no staging | Memory constraints on driver, no checkpointing |
+-- MAGIC | **DBMS_CLOUD.EXPORT_DATA → Auto Loader** | Large tables on Oracle ADB | Resumable, schema evolution, checkpointing | Requires staging storage, complex on-prem setup, not doable on AWS RDS |
+-- MAGIC | **Spark JDBC Connector** | Direct reads, flexible queries | No staging needed, works with on-prem | Driver bottleneck by default, requires JDBC JAR |
+-- MAGIC | **ADF / AWS DMS → Auto Loader** | Cloud-native pipelines, CDC | Managed service, incremental support | Cloud-specific, additional service cost |
+-- MAGIC | **3rd Party Tools** | Enterprise integrations | Validated connectors, UI-driven | Licensing costs, vendor dependency |
+-- MAGIC | **Export + Upload** | General solution | Handles large tables | Time-consuming, manual |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC    
+-- MAGIC ## 2. Exporting from Oracle
+-- MAGIC
+-- MAGIC Transferring legacy on-premise Oracle data to cloud storage for consumption in Databricks can be demanding. Several viable approaches exist depending on your Oracle deployment (ADB vs on-prem), cloud provider, and data volume. The sections below summarize each approach and when to use it.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Migration Approaches Summary
+-- MAGIC %md
+-- MAGIC            
+-- MAGIC ### Migration Approaches
+-- MAGIC
+-- MAGIC | # | Approach | Description | Incremental Strategy |
+-- MAGIC |---|---------|-------------|---------------------|
+-- MAGIC | 1 | **Spark JDBC Connector** | Connect directly to Oracle and load into Spark DataFrames. Requires the Oracle JDBC driver JAR (e.g., `ojdbc17`) installed on the cluster. | Watermark column (timestamp or auto-increment ID) to fetch only new/changed records. |
+-- MAGIC | 2 | **Cloud ETL Services** | Use **Azure Data Factory** (ADF) or **AWS DMS** to replicate Oracle tables to cloud storage (Blob / S3), then ingest with Auto Loader. For petabyte-scale historical loads, consider physical transfer devices (**Azure Data Box** / **AWS Snowball**). | ADF and DMS both support CDC and watermark-based incremental loading. |
+-- MAGIC | 3 | **DBMS_CLOUD.EXPORT_DATA** | Native on Oracle ADB — exports tables directly to S3/ADLS/GCS in Parquet. Requires significant DBA setup for on-prem Oracle (19.9+). On-prem users often default to JDBC or cloud ETL approaches instead. | Schedule periodic exports of changed partitions or date ranges. |
+-- MAGIC | 4 | **3rd Party Tools** | Fivetran, Qlik, Matillion, Prophecy, and others available through **Databricks Partner Connect** for easy integration with clusters and SQL warehouses. | Most partners support CDC-based incremental syncs. |
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Create Cloud Credential (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC Create a cloud credential in Oracle to allow access to the target S3 bucket. This example uses AWS Access Keys, but Resource Principals are preferred on OCI.
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Create cloud credential for S3 access
+-- MAGIC BEGIN
+-- MAGIC   DBMS_CLOUD.CREATE_CREDENTIAL(
+-- MAGIC     credential_name => 'migration_s3_credential',
+-- MAGIC     username        => 'YOUR_AWS_ACCESS_KEY_ID',      -- update with your AWS access key
+-- MAGIC     password        => 'YOUR_AWS_SECRET_ACCESS_KEY'   -- update with your AWS secret key
+-- MAGIC   );
+-- MAGIC END;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Export HR.EMPLOYEES to S3 (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC With the credential created, use `DBMS_CLOUD.EXPORT_DATA` to export the `EMPLOYEES` table to S3 as Parquet.
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Export HR.EMPLOYEES to S3 as Parquet
+-- MAGIC BEGIN
+-- MAGIC   DBMS_CLOUD.EXPORT_DATA(
+-- MAGIC     credential_name => 'migration_s3_credential',
+-- MAGIC     file_uri_list   => 's3://migration-bucket/landing/hr/employees/employees_',
+-- MAGIC     query           => 'SELECT * FROM HR.EMPLOYEES',
+-- MAGIC     format          => JSON_OBJECT('type' VALUE 'parquet', 'compression' VALUE 'snappy')
+-- MAGIC   );
+-- MAGIC END;
+-- MAGIC
+-- MAGIC -- Verify files were written to S3
+-- MAGIC SELECT * FROM DBMS_CLOUD.LIST_OBJECTS(
+-- MAGIC   'migration_s3_credential',
+-- MAGIC   's3://migration-bucket/landing/hr/employees/'
+-- MAGIC );
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Data Type Compatibility</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Oracle and Spark/Parquet have different type systems. The following Oracle types require attention during export:</p>
+-- MAGIC             <table style="margin: 12px 0; border-collapse: collapse; width: 100%;">
+-- MAGIC                 <tr style="background: #ffe0b2;">
+-- MAGIC                     <th style="border: 1px solid #ffcc80; padding: 8px; text-align: left;">Oracle Type</th>
+-- MAGIC                     <th style="border: 1px solid #ffcc80; padding: 8px; text-align: left;">Recommendation</th>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="border: 1px solid #ffcc80; padding: 8px;"><code>DATE</code></td>
+-- MAGIC                     <td style="border: 1px solid #ffcc80; padding: 8px;">Exports as Timestamp. In Oracle, DATE includes time; ensure this is captured.</td>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="border: 1px solid #ffcc80; padding: 8px;"><code>CLOB / BLOB</code></td>
+-- MAGIC                     <td style="border: 1px solid #ffcc80; padding: 8px;">Large objects can impact export performance. Consider using <code>TO_CHAR</code> for CLOBs.</td>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="border: 1px solid #ffcc80; padding: 8px;"><code>RAW</code></td>
+-- MAGIC                     <td style="border: 1px solid #ffcc80; padding: 8px;">Maps to Binary.</td>
+-- MAGIC                 </tr>
+-- MAGIC             </table>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Recommendation:</b> Always use a <code>SELECT</code> with explicit column casting if specific formatting is required for the target system.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Network & Incremental Load Planning</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">All migration methods depend heavily on <b>network configuration</b> — minimize hops between networks and consider dedicating separate bandwidth for migration traffic. Plan carefully for <b>incremental catch-up</b>: long-running initial transfers can fall behind as new data accumulates, creating a perpetual catch-up cycle. Choosing the right incremental strategy early avoids this problem.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC            
+-- MAGIC ### Migration Paths to Cloud Storage
+-- MAGIC
+-- MAGIC The diagram below illustrates how Oracle data reaches cloud storage through different migration pipelines. Once data lands in storage, Auto Loader or `COPY INTO` ingests it into Bronze Delta tables.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart TB
+-- MAGIC     subgraph OR["Oracle"]
+-- MAGIC         TBL["Source Tables"]
+-- MAGIC     end
+-- MAGIC     subgraph PIPE["Migration Pipelines"]
+-- MAGIC         DBMS["DBMS_CLOUD.EXPORT_DATA<br/><i>(ADB-native)</i>"]
+-- MAGIC         DMS["ADF / AWS DMS<br/><i>(Cloud-managed)</i>"]
+-- MAGIC         MAN["Manual Export + Upload<br/><i>(General)</i>"]
+-- MAGIC     end
+-- MAGIC     subgraph CLOUD["Cloud Storage (S3 / ADLS / GCS)"]
+-- MAGIC         FILES["Parquet / CSV Files"]
+-- MAGIC     end
+-- MAGIC     subgraph DB["Databricks"]
+-- MAGIC         AL["Auto Loader / COPY INTO"]
+-- MAGIC         BRONZE["Bronze Delta Tables"]
+-- MAGIC     end
+-- MAGIC     TBL --> DBMS --> FILES
+-- MAGIC     TBL --> DMS --> FILES
+-- MAGIC     TBL --> MAN --> FILES
+-- MAGIC     FILES --> AL --> BRONZE
+-- MAGIC     style OR fill:#fff,stroke:#F80102,stroke-width:2px
+-- MAGIC     style PIPE fill:#fff,stroke:#607d8b,stroke-width:1px
+-- MAGIC     style CLOUD fill:#fff,stroke:#FF9900,stroke-width:2px
+-- MAGIC     style DB fill:#fff,stroke:#FF3621,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Parquet vs CSV</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Always prefer <b>Parquet</b> for migration exports. It preserves datatypes, provides built-in compression, and loads much faster than CSV. Parquet also maintains the columnar structure of the data which maps naturally to Delta Lake.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 3. Ingesting Data using `COPY INTO`
+-- MAGIC
+-- MAGIC With the Parquet files exported from Oracle and landed in the external volume, use Databricks `COPY INTO` to load the data into Delta tables. `COPY INTO` is **idempotent** - files that have already been loaded are tracked and automatically skipped on subsequent runs.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 4. Ingesting with Auto Loader
+-- MAGIC
+-- MAGIC Auto Loader provides incremental, exactly-once ingestion from cloud storage with automatic schema inference and evolution. It is the recommended pattern for production ingestion pipelines. Use Auto Loader as a source for Spark Structured Streaming code and / or Lakeflow Spark Declarative Pipelines.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Auto Loader syntax illustration (source)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="python">
+-- MAGIC df = (spark.readStream
+-- MAGIC     .format("cloudFiles")
+-- MAGIC     .option("cloudFiles.format", "parquet")
+-- MAGIC     .option("cloudFiles.schemaLocation", f"{checkpoint_path}/_schema")
+-- MAGIC     .load(source_path)
+-- MAGIC )
+-- MAGIC </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+-- MAGIC
+-- MAGIC
+-- MAGIC
+-- MAGIC <a href="https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/">Auto Loader reference</a>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 5. Direct Migration with Lakehouse Federation
+-- MAGIC
+-- MAGIC For smaller tables or when staging storage is not feasible, use the Lakehouse Federation to read directly from Oracle. This is the recommended approach for on-prem Oracle where `DBMS_CLOUD` setup is complex.
+-- MAGIC
+-- MAGIC Note: in this case, the data is submitted through JDBC, which comes with some performance implications.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Spark JDBC Considerations</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">The Spark JDBC Connector pulls data through the Spark Driver by default. For large tables, configure <b>partitioning</b> (<code>partitionColumn</code>, <code>lowerBound</code>, <code>upperBound</code>, <code>numPartitions</code>) in the JDBC options to enable parallel reads from Oracle. Also, monitor the impact of multiple JDBC connections on your Oracle database.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Partitioning and Clustering
+-- MAGIC
+-- MAGIC Configure storage optimization during or after ingestion.
+-- MAGIC
+-- MAGIC  Strategy | Cardinality | When to Use | Implementation |
+-- MAGIC ----------|-------------|-------------|----------------|
+-- MAGIC  **Liquid Clustering** | All cases | Most tables (recommended) | `CLUSTER BY (employee_id, department_id)` |
+-- MAGIC  **Partitioning** | Low | Very large tables (> 1TB) with clear partition keys | `PARTITIONED BY (hire_year)` |
+-- MAGIC  **Z-Ordering** | Medium | Legacy; use Liquid Clustering instead | `OPTIMIZE ... ZORDER BY` |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 7. Migration Validation
+-- MAGIC
+-- MAGIC Validate row counts and sample data between Oracle source and Databricks target to ensure that they agree and no data was lost.
+-- MAGIC Lakehouse Federation is an extremely useful asset in this situation, as we can run the same count on both the source and the migrated table from within Databricks, with query pushdown.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Summary
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Migration Checklist
+-- MAGIC
+-- MAGIC ✅ Oracle exports completed to cloud storage via `DBMS_CLOUD` (if ADB) or JDBC (if on-prem)  
+-- MAGIC ✅ Auto Loader / `COPY INTO` ingestion implemented for Bronze layer  
+-- MAGIC ✅ Data types (DATE, NUMBER) correctly mapped to Spark/Delta  
+-- MAGIC ✅ Liquid Clustering configured for performant queries  
+-- MAGIC ✅ Row counts and checksums validated against Oracle  
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Pattern Selection Guide
+-- MAGIC
+-- MAGIC | Data Volume | Recommended Pattern |
+-- MAGIC |-------------|---------------------|
+-- MAGIC | < 1 GB | Lakehouse Federation (direct) |
+-- MAGIC | 1 GB - 100 GB | COPY INTO -> Auto Loader |
+-- MAGIC | > 100 GB | COPY INTO -> Auto Loader with partitioned exports |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## References
+-- MAGIC
+-- MAGIC - [Auto Loader](https://docs.databricks.com/en/ingestion/cloud-object-storage/auto-loader/index.html)
+-- MAGIC - [Databricks `COPY INTO`](https://docs.databricks.com/en/sql/language-manual/delta-copy-into.html)
+-- MAGIC - [Oracle `DBMS_CLOUD.EXPORT_DATA`](https://docs.oracle.com/en-us/iaas/autonomous-database/doc/ld-export-object-store-using-dbms_cloud-export_data.html)
+-- MAGIC - [Lakehouse Federation](https://docs.databricks.com/aws/en/query-federation/)
+-- MAGIC - [Query Federation with Oracle](https://docs.databricks.com/aws/en/query-federation/oracle)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

@@ -1,0 +1,677 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">04 - Activate</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Observability and Monitoring
+-- MAGIC
+-- MAGIC This lesson covers enabling runtime visibility into migrated pipelines using Databricks system tables, Lakeflow event logs, and operational dashboards. You will configure monitoring for usage, lineage, and access patterns, build dashboards to track validation progress and performance, and tune Delta tables before cutover.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Enable and query Lakeflow event logs and system tables for usage, lineage, and access monitoring
+-- MAGIC - Build operational dashboards for validation coverage, throughput, and job performance metrics
+-- MAGIC - Tune partitioning, clustering, and storage optimization for optimal query performance before cutover
+-- MAGIC - Compare Oracle and Databricks monitoring capabilities and establish equivalent observability
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 1. Observability Architecture
+-- MAGIC
+-- MAGIC Databricks provides a unified observability layer through system tables, event logs, and Unity Catalog lineage.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC block-beta
+-- MAGIC columns 5
+-- MAGIC     block:sources:1
+-- MAGIC         columns 1
+-- MAGIC         JOB["Lakeflow Jobs"]
+-- MAGIC         SQL["SQL Warehouses"]
+-- MAGIC         SDP["Lakeflow SDP Pipelines"]
+-- MAGIC     end
+-- MAGIC     space
+-- MAGIC     block:system:1
+-- MAGIC         columns 1
+-- MAGIC         SYS["System Tables"]
+-- MAGIC         EVT["Event Logs"]
+-- MAGIC     end
+-- MAGIC     space
+-- MAGIC     block:output:1
+-- MAGIC         columns 1
+-- MAGIC         DASH["Dashboards, Queries and Alerts"]
+-- MAGIC     end
+-- MAGIC     JOB --> SYS
+-- MAGIC     SQL --> SYS
+-- MAGIC     SDP --> EVT
+-- MAGIC     SDP --> SYS
+-- MAGIC     SYS --> DASH
+-- MAGIC     EVT --> DASH
+-- MAGIC     style sources fill:#ffebee,stroke:#FF3621,stroke-width:2px
+-- MAGIC     style system fill:#eceff1,stroke:#607d8b,stroke-width:2px
+-- MAGIC     style output fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 2. System Tables Overview
+-- MAGIC
+-- MAGIC Databricks system tables provide operational data for monitoring jobs, queries, billing, and access patterns. These tables are located in the `system` catalog.
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks Schema</span> | Key Tables | Purpose |
+-- MAGIC |--------|------------|---------|
+-- MAGIC | `system.lakeflow` | `jobs`, `job_run_timeline`, `job_task_run_timeline`, `pipelines` | Job and pipeline execution history |
+-- MAGIC | `system.compute` | `clusters`, `warehouses`, `warehouse_events`, `node_timeline` | Compute utilization and configuration |
+-- MAGIC | `system.billing` | `usage`, `list_prices` | Cost tracking and chargebacks |
+-- MAGIC | `system.access` | `audit`, `table_lineage`, `column_lineage` | Security auditing and data lineage |
+-- MAGIC | `system.query` | `history` | SQL query execution details |
+-- MAGIC | `system.storage` | `predictive_optimization_operations_history` | Table optimization events |
+-- MAGIC | `system.serving` | `endpoint_usage`, `served_entities` | Model serving metrics |
+-- MAGIC | `system.mlflow` | `experiments_latest`, `runs_latest`, `run_metrics_history` | MLflow experiment tracking |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Oracle to Databricks Observability Mapping
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | Purpose |
+-- MAGIC |-----------|------------|---------| 
+-- MAGIC | `V$SQL` / `DBA_HIST_SQLTEXT` | `system.query.history` | Query execution details |
+-- MAGIC | `DBA_SCHEDULER_JOB_RUN_DETAILS` | `system.lakeflow.job_run_timeline` | Scheduled job history |
+-- MAGIC | `DBA_HIST_SYSMETRIC_HISTORY` | `system.billing.usage` | Compute consumption |
+-- MAGIC | `DBA_AUDIT_TRAIL` / `DBA_FGA_AUDIT_TRAIL` | `system.access.audit` | Table/column access tracking |
+-- MAGIC | `DBA_DEPENDENCIES` | `system.access.table_lineage` | Data lineage |
+-- MAGIC | `DBA_AUDIT_SESSION` | `system.access.audit` | Login and authentication events |
+-- MAGIC | `DBA_SEGMENTS` | `system.storage.predictive_optimization_operations_history` | Storage metrics |
+-- MAGIC | `ALL_TAB_COLUMNS` | `system.information_schema.columns` | Schema metadata |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Accessing System Tables</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">System tables are enabled by default and located in the <code>system</code> catalog. To grant access, an account admin or metastore admin must provide <code>USE CATALOG</code> on <code>system</code>, <code>USE SCHEMA</code> on the relevant schemas (e.g., <code>system.billing</code>), and <code>SELECT</code> on specific tables. System tables are read-only and contain data from all workspaces in your account within the same cloud region.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 3. Monitoring Job Execution
+-- MAGIC
+-- MAGIC Query the `system.lakeflow` schema to monitor job runs and compare against Oracle task history baselines.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 4. Lakeflow Pipeline Monitoring
+-- MAGIC
+-- MAGIC Lakeflow Declarative Pipelines provide two complementary approaches for monitoring:
+-- MAGIC
+-- MAGIC | Approach | Source | Best For |
+-- MAGIC |----------|--------|----------|
+-- MAGIC | **System Tables** | `system.lakeflow.pipeline_update_timeline` | Account-wide pipeline metrics, update history, cross-pipeline comparisons |
+-- MAGIC | **Event Logs** | Pipeline storage or `event_log()` TVF | Detailed per-pipeline flow progress, data quality results, row counts |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Pipeline Event Logs
+-- MAGIC
+-- MAGIC For detailed flow-level metrics (rows written, data quality expectations, individual table updates), query the pipeline's **event log**. Event logs are stored in the pipeline's storage location and can be exposed as a table.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Enabling Event Log Tables</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">To create a queryable event log table, add an <code>event_log</code> block to your pipeline YAML configuration:</p>
+-- MAGIC             <div class="code-block" data-language="yaml">event_log:
+-- MAGIC   name: event_log_my_pipeline
+-- MAGIC   schema: my_schema
+-- MAGIC   catalog: my_catalog</div>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">This creates a table at <code>my_catalog.my_schema.event_log_my_pipeline</code> that you can query directly.</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Alternatively, use the <code>event_log()</code> TVF with a pipeline ID (no setup required):<br/><code>SELECT * FROM event_log("&lt;pipeline-id&gt;")</code></p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 5. Data Lineage Monitoring
+-- MAGIC
+-- MAGIC Unity Catalog captures runtime data lineage across notebooks, jobs, pipelines, and SQL queries. Use lineage tables to understand data flow and identify dependencies before cutover.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">🔍</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #004d40; font-size: 1.1em;">Unity Catalog Column-Level Lineage as a Post-Migration Validation Tool</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 Unity Catalog automatically captures <b>column-level lineage</b> for all SQL queries, notebook transformations, and pipeline runs — without any instrumentation. After migration, use lineage to validate completeness of the migrated pipeline:
+-- MAGIC             </p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Verify every target column has a tracked upstream source (<code>system.access.column_lineage</code>).</li>
+-- MAGIC                 <li>Identify orphaned columns in Gold tables that have no lineage — these may indicate incomplete pipeline migration.</li>
+-- MAGIC                 <li>Confirm that downstream BI tables and reporting views are wired to the correct Silver/Gold sources, not residual Oracle foreign data wrapper tables.</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 Lineage is available in the Unity Catalog UI (Catalog Explorer → Table → Lineage tab) and via SQL queries on <code>system.access.table_lineage</code> and <code>system.access.column_lineage</code>.
+-- MAGIC             </p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Usage Monitoring
+-- MAGIC
+-- MAGIC Understanding table access patterns helps prioritize cutover sequencing. Tables with high access frequency, many unique users, or critical downstream dependencies should be validated thoroughly before migration.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Cutover Prioritization Strategy
+-- MAGIC
+-- MAGIC | Priority | Criteria | Rationale |
+-- MAGIC |----------|----------|-----------|
+-- MAGIC | **High** | High access count, many unique users | Broad impact, needs thorough validation |
+-- MAGIC | **High** | Used by production jobs/dashboards | Business-critical dependencies |
+-- MAGIC | **Medium** | Moderate access, few users | Limited blast radius if issues occur |
+-- MAGIC | **Low** | Rarely accessed, single user | Can migrate with minimal risk |
+-- MAGIC
+-- MAGIC Use the `audit` table to identify access patterns, then cross-reference with lineage data to understand downstream dependencies.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 7. Billing Monitoring and Cost Optimization
+-- MAGIC
+-- MAGIC Query the `system.billing.usage` table to track compute consumption and costs by SKU, workspace, and job.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #2196f3; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #1565c0; font-size: 1.1em;">Tag Resources for Cost Attribution</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Apply consistent tags to <strong>clusters</strong>, <strong>jobs</strong>, <strong>pipelines</strong>, and <strong>SQL warehouses</strong> for accurate cost recovery and chargebacks. Tags propagate to <code>system.billing.usage</code> via <code>custom_tags</code>, enabling spend attribution by team, project, or cost center. Without tags, usage appears as unattributed compute—making it difficult to identify expensive workloads or allocate costs to business units.</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><strong>Recommended tags:</strong> <code>team</code>, <code>project</code>, <code>cost_center</code>, <code>environment</code> (dev/prod)</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 8. Extracting Monitoring Baselines from Oracle
+-- MAGIC
+-- MAGIC Before cutover, extract key performance baselines from Oracle to establish SLA targets for Databricks.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Query performance baselines for SLA comparison</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC SELECT 
+-- MAGIC     parsing_schema_name,
+-- MAGIC     module,
+-- MAGIC     COUNT(*) AS query_count,
+-- MAGIC     AVG(elapsed_time_delta) / 1000000 AS avg_duration_seconds,
+-- MAGIC     PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY elapsed_time_delta) / 1000000 AS p50_seconds,
+-- MAGIC     PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY elapsed_time_delta) / 1000000 AS p95_seconds,
+-- MAGIC     PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY elapsed_time_delta) / 1000000 AS p99_seconds,
+-- MAGIC     AVG(physical_read_bytes_delta) / (1024*1024*1024) AS avg_gb_scanned
+-- MAGIC FROM DBA_HIST_SQLSTAT
+-- MAGIC JOIN DBA_HIST_SNAPSHOT s ON DBA_HIST_SQLSTAT.snap_id = s.snap_id
+-- MAGIC WHERE s.begin_interval_time >= SYSDATE - 30
+-- MAGIC   AND parsing_schema_name = 'ORCL'
+-- MAGIC GROUP BY parsing_schema_name, module
+-- MAGIC ORDER BY query_count DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Scheduled job execution baselines</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC SELECT 
+-- MAGIC     job_name,
+-- MAGIC     owner AS schema_name,
+-- MAGIC     COUNT(*) AS execution_count,
+-- MAGIC     AVG(EXTRACT(DAY FROM run_duration) * 86400 + EXTRACT(HOUR FROM run_duration) * 3600 + EXTRACT(MINUTE FROM run_duration) * 60 + EXTRACT(SECOND FROM run_duration)) AS avg_duration_seconds,
+-- MAGIC     SUM(CASE WHEN status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS success_count,
+-- MAGIC     SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failure_count
+-- MAGIC FROM DBA_SCHEDULER_JOB_RUN_DETAILS
+-- MAGIC WHERE log_date >= SYSDATE - 30
+-- MAGIC   AND owner = 'ORCL'
+-- MAGIC GROUP BY job_name, owner
+-- MAGIC ORDER BY execution_count DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 9. Building Operational Dashboards
+-- MAGIC
+-- MAGIC Create dashboards to track migration validation progress, job performance, and data quality metrics. These dashboards provide stakeholder visibility and support go/no-go decisions.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Creating AI/BI Dashboards</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Save these monitoring queries as AI/BI Dashboard visualizations for real-time tracking. Configure scheduled refreshes to keep metrics current, and set up alerts for SLA breaches or job failures. Dashboards can be shared with stakeholders for cutover readiness reviews.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #2196f3; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #1565c0; font-size: 1.1em;">Beyond Migration: Lakehouse Monitoring</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">For ongoing data quality monitoring after migration, consider <strong>Lakehouse Monitoring</strong>. It automatically computes profiling metrics over time, tracks drift against baselines, and can monitor ML model performance via inference tables. See <a href="https://docs.databricks.com/aws/en/data-quality-monitoring/data-profiling" target="_blank" style="color: #1565c0;">Lakehouse Monitoring documentation</a>.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 10. Performance Tuning Before Cutover
+-- MAGIC
+-- MAGIC Optimize Delta tables before cutover to ensure query performance meets or exceeds Oracle baselines.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Optimization Feature Mapping
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | When to Apply |
+-- MAGIC |-----------|---------------|---------------|
+-- MAGIC | Partitioning / Subpartitioning | Liquid Clustering | High-cardinality filter columns |
+-- MAGIC | B-Tree / Bitmap Indexes | Bloom filters / Data skipping | Point lookups on large tables |
+-- MAGIC | Exadata Smart Scan / Storage Indexes | Predictive Optimization / Liquid Clustering | Accelerating table scans |
+-- MAGIC | Materialized Views | Materialized Views / Aggregate tables | Repeated aggregation queries |
+-- MAGIC | Result Cache / Buffer Cache | Query result cache | Repeated identical queries |
+-- MAGIC | Exadata Resource Management | Cluster sizing / Serverless | Workload-based scaling |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #2196f3; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #1565c0; font-size: 1.1em;">Predictive Optimization</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><strong>Predictive optimization</strong> automatically maintains Unity Catalog managed tables by running <code>OPTIMIZE</code>, <code>VACUUM</code>, and <code>ANALYZE</code> operations as needed. It identifies tables that would benefit from maintenance, queues operations on serverless compute, and collects statistics during writes. This eliminates manual maintenance scheduling and ensures consistent query performance without operational overhead. Enabled by default for accounts created after November 2024, and rolling out to existing accounts through February 2026. See <a href="https://docs.databricks.com/en/optimizations/predictive-optimization.html" target="_blank" style="color: #1565c0;">Predictive Optimization documentation</a>.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 11. Configuring Alerts
+-- MAGIC
+-- MAGIC Databricks provides multiple ways to set up alerts for job failures, SLA breaches, and data quality issues:
+-- MAGIC
+-- MAGIC | Method | Best For |
+-- MAGIC |--------|----------|
+-- MAGIC | **SQL Alerts** | Query-based alerts on system tables or business metrics |
+-- MAGIC | **Job Notifications** | Direct job failure/success notifications |
+-- MAGIC | **Declarative Automation Bundles (DAB)** | Infrastructure-as-code alert definitions |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Declarative Automation Bundles Alert Configuration
+-- MAGIC
+-- MAGIC Define alerts as code using Declarative Automation Bundles for reproducible, version-controlled monitoring.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 DAB Alert Example: Migration Job Failure Monitor</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC # databricks.yml - Alert resource definition
+-- MAGIC # Monitors for failed migration jobs and notifies the team
+-- MAGIC
+-- MAGIC resources:
+-- MAGIC   alerts:
+-- MAGIC     migration_job_failure_alert:
+-- MAGIC       display_name: "Migration Job Failures"
+-- MAGIC       custom_summary: "{{query_result_rows}} migration job(s) failed in the last hour"
+-- MAGIC       custom_description: |
+-- MAGIC         One or more Oracle-to-Databricks migration jobs have failed.
+-- MAGIC         Review the job runs in Workflows > Job Runs and check logs for errors.
+-- MAGIC       query_text: |
+-- MAGIC         SELECT 
+-- MAGIC           j.name AS job_name,
+-- MAGIC           jrt.run_id,
+-- MAGIC           jrt.result_state,
+-- MAGIC           jrt.termination_code,
+-- MAGIC           jrt.period_start_time
+-- MAGIC         FROM system.lakeflow.job_run_timeline jrt
+-- MAGIC         JOIN system.lakeflow.jobs j ON jrt.job_id = j.job_id
+-- MAGIC         WHERE jrt.result_state = 'FAILED'
+-- MAGIC           AND j.name LIKE '%migration%'
+-- MAGIC           AND jrt.period_start_time >= current_timestamp() - INTERVAL 1 HOUR
+-- MAGIC       warehouse_id: ${var.warehouse_id}
+-- MAGIC       evaluation:
+-- MAGIC         comparison_operator: GREATER_THAN
+-- MAGIC         empty_result_state: OK
+-- MAGIC         source:
+-- MAGIC           name: job_name
+-- MAGIC           aggregation: COUNT
+-- MAGIC           display: "Failed Jobs"
+-- MAGIC         threshold:
+-- MAGIC           value:
+-- MAGIC             double_value: 0
+-- MAGIC         notification:
+-- MAGIC           notify_on_ok: true
+-- MAGIC           retrigger_seconds: 3600
+-- MAGIC           subscriptions:
+-- MAGIC             - user_email: migration-team@example.com
+-- MAGIC       schedule:
+-- MAGIC         pause_status: UNPAUSED
+-- MAGIC         quartz_cron_schedule: "0 */15 * * * ?"
+-- MAGIC         timezone_id: Australia/Melbourne
+-- MAGIC       permissions:
+-- MAGIC         - level: CAN_MANAGE
+-- MAGIC           group_name: migration-admins
+-- MAGIC         - level: CAN_VIEW
+-- MAGIC           group_name: data-engineering
+-- MAGIC
+-- MAGIC variables:
+-- MAGIC   warehouse_id:
+-- MAGIC     description: "SQL Warehouse ID for alert queries"
+-- MAGIC     default: "your-warehouse-id"
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 DAB Alert Example: Data Freshness SLA Monitor</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC # databricks.yml - Data freshness alert
+-- MAGIC # Detects stale tables that haven't been updated within SLA
+-- MAGIC
+-- MAGIC resources:
+-- MAGIC   alerts:
+-- MAGIC     data_freshness_sla_alert:
+-- MAGIC       display_name: "Migration Data Freshness SLA"
+-- MAGIC       custom_summary: "{{query_result_rows}} table(s) exceed freshness SLA"
+-- MAGIC       custom_description: |
+-- MAGIC         Migrated tables have not been updated within the expected SLA window.
+-- MAGIC         This may indicate pipeline failures or replication lag.
+-- MAGIC       query_text: |
+-- MAGIC         SELECT 
+-- MAGIC           t.table_schema,
+-- MAGIC           t.table_name,
+-- MAGIC           t.last_altered,
+-- MAGIC           TIMESTAMPDIFF(HOUR, t.last_altered, current_timestamp()) AS hours_since_update
+-- MAGIC         FROM migration_dev.information_schema.tables t
+-- MAGIC         WHERE t.table_schema = 'hr_raw'
+-- MAGIC           AND t.last_altered < current_timestamp() - INTERVAL 4 HOURS
+-- MAGIC       warehouse_id: ${var.warehouse_id}
+-- MAGIC       evaluation:
+-- MAGIC         comparison_operator: GREATER_THAN
+-- MAGIC         empty_result_state: OK
+-- MAGIC         source:
+-- MAGIC           name: table_name
+-- MAGIC           aggregation: COUNT
+-- MAGIC           display: "Stale Tables"
+-- MAGIC         threshold:
+-- MAGIC           value:
+-- MAGIC             double_value: 0
+-- MAGIC         notification:
+-- MAGIC           notify_on_ok: false
+-- MAGIC           retrigger_seconds: 7200
+-- MAGIC           subscriptions:
+-- MAGIC             - user_email: data-ops@example.com
+-- MAGIC       schedule:
+-- MAGIC         pause_status: UNPAUSED
+-- MAGIC         quartz_cron_schedule: "0 0 * * * ?"
+-- MAGIC         timezone_id: Australia/Melbourne
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'yaml';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Summary
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Observability Readiness Checklist</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>System tables enabled and accessible</li>
+-- MAGIC                 <li>Job performance metrics within SLA thresholds</li>
+-- MAGIC                 <li>Lakeflow Pipeline monitoring configured</li>
+-- MAGIC                 <li>Lineage tracking verified for migrated tables</li>
+-- MAGIC                 <li>Operational dashboards deployed and refreshing</li>
+-- MAGIC                 <li>Alerts configured for failures and SLA breaches</li>
+-- MAGIC                 <li>Delta tables optimized (<code>CLUSTER BY</code>, <code>OPTIMIZE</code>, <code>ANALYZE</code>)</li>
+-- MAGIC                 <li>Query performance validated against Oracle baselines</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC **System Schemas Quick Reference**
+-- MAGIC
+-- MAGIC | Schema | Purpose |
+-- MAGIC |--------|---------|
+-- MAGIC | `system.lakeflow` | Job and pipeline execution history |
+-- MAGIC | `system.query` | SQL query performance |
+-- MAGIC | `system.billing` | Cost and consumption tracking |
+-- MAGIC | `system.access` | Audit logs and data lineage |
+-- MAGIC | `system.storage` | Predictive optimization history |
+-- MAGIC
+-- MAGIC **Oracle to Databricks Mapping**
+-- MAGIC
+-- MAGIC | Monitoring Area | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> |
+-- MAGIC |-----------------|-----------|------------|
+-- MAGIC | Job Execution | `DBA_SCHEDULER_JOB_RUN_DETAILS` | `system.lakeflow` |
+-- MAGIC | Query Performance | `V$SQL` / `DBA_HIST_SQLTEXT` | `system.query.history` |
+-- MAGIC | Data Lineage | `DBA_DEPENDENCIES` | `system.access.table_lineage` |
+-- MAGIC | Access Auditing | `DBA_AUDIT_TRAIL` | `system.access.audit` |
+-- MAGIC | Usage/Consumption | `DBA_HIST_SYSMETRIC_HISTORY` | `system.billing.usage` |
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### References
+-- MAGIC
+-- MAGIC - [System Tables](https://docs.databricks.com/en/admin/system-tables/index.html)
+-- MAGIC - [Data Lineage](https://docs.databricks.com/en/data-governance/unity-catalog/data-lineage.html)
+-- MAGIC - [Delta Optimization](https://docs.databricks.com/en/delta/optimize.html)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

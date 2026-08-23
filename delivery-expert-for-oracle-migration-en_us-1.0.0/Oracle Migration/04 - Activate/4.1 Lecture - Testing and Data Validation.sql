@@ -1,0 +1,923 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">04 - Activate</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Testing and Data Validation
+-- MAGIC
+-- MAGIC This lesson covers systematic approaches to validating migrated data and implementing testing frameworks. You will perform data parity checks between Oracle and Databricks, use Lakebridge Reconciler for automated reconciliation, leverage testing libraries for verification, and define quantitative governance rules using Delta constraints.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Perform data parity validation including record counts, aggregations, nulls, and string matching
+-- MAGIC - Use Lakebridge Reconciler for automated schema, row, and data validation between Oracle and Databricks
+-- MAGIC - Use testing frameworks (Chispa, Great Expectations, pytest) for automated verification
+-- MAGIC - Define quantitative governance rules (counts, stddevs, timestamp bounds) in Delta metadata
+-- MAGIC - Extract validation queries from Oracle for conversion to Databricks
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 1. Data Validation Workflow
+-- MAGIC
+-- MAGIC A structured validation approach ensures migrated data matches source data before cutover.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC block-beta
+-- MAGIC columns 5
+-- MAGIC     block:or:1
+-- MAGIC         columns 1
+-- MAGIC         SRC["Source Tables"]
+-- MAGIC         OP1[" "]
+-- MAGIC         OP2[" "]
+-- MAGIC     end
+-- MAGIC     space
+-- MAGIC     block:val:1
+-- MAGIC         columns 1
+-- MAGIC         CNT["Row Counts"]
+-- MAGIC         AGG["Aggregations"]
+-- MAGIC         NUL["Null Checks"]
+-- MAGIC         STR["String Matching"]
+-- MAGIC     end
+-- MAGIC     space
+-- MAGIC     block:db:1
+-- MAGIC         columns 1
+-- MAGIC         TGT["Target Tables"]
+-- MAGIC         SP3[" "]
+-- MAGIC         SP4[" "]
+-- MAGIC         RPT[("Validation Report")]
+-- MAGIC     end
+-- MAGIC     SRC --> CNT
+-- MAGIC     SRC --> AGG
+-- MAGIC     SRC --> NUL
+-- MAGIC     SRC --> STR
+-- MAGIC     TGT --> CNT
+-- MAGIC     TGT --> AGG
+-- MAGIC     TGT --> NUL
+-- MAGIC     TGT --> STR
+-- MAGIC     CNT --> RPT
+-- MAGIC     AGG --> RPT
+-- MAGIC     NUL --> RPT
+-- MAGIC     STR --> RPT
+-- MAGIC     style or fill:#e3f2fd,stroke:#29B5E8,stroke-width:2px
+-- MAGIC     style val fill:#eceff1,stroke:#607d8b,stroke-width:2px
+-- MAGIC     style db fill:#ffebee,stroke:#FF3621,stroke-width:2px
+-- MAGIC     style OP1 fill:#e3f2fd,stroke:#e3f2fd
+-- MAGIC     style OP2 fill:#e3f2fd,stroke:#e3f2fd
+-- MAGIC     style SP3 fill:#ffebee,stroke:#ffebee
+-- MAGIC     style SP4 fill:#ffebee,stroke:#ffebee
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 2. Data Parity Check Types
+-- MAGIC
+-- MAGIC | Validation Type | What It Checks | When to Use |
+-- MAGIC |-----------------|----------------|-------------|
+-- MAGIC | **Record Counts** | Total rows per table match | Every table, first validation |
+-- MAGIC | **Sum/Aggregations** | Numeric column totals match | Financial, quantity columns |
+-- MAGIC | **Null Counts** | `NULL` distribution unchanged | All columns, especially after transforms |
+-- MAGIC | **Distinct Counts** | Cardinality preserved | Key columns, dimensions |
+-- MAGIC | **String Checksums** | Character data integrity | Text columns, especially `VARIANT` conversions |
+-- MAGIC | **Min/Max Bounds** | Value ranges preserved | Dates, timestamps, numeric ranges |
+-- MAGIC | **Hash Comparisons** | Row-level data integrity | Critical tables, sample-based validation |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 3. Extracting Validation Baselines from Oracle
+-- MAGIC
+-- MAGIC Before validating in Databricks, extract baseline metrics from Oracle. Three approaches are available:
+-- MAGIC
+-- MAGIC | Approach | How | Best For |
+-- MAGIC |----------|-----|----------|
+-- MAGIC | **`ALL_TABLES` statistics** | Query `ALL_TABLES.NUM_ROWS` — fast but relies on `DBMS_STATS` being current | Quick estimates; always follow up with exact `COUNT(*)` during freeze |
+-- MAGIC | **Export via `DBMS_CLOUD`** | Run `COUNT(*)` / aggregate queries and export results to object storage as Parquet using `DBMS_CLOUD.EXPORT_DATA`; load into Databricks as a temp view | Autonomous Database environments; produces a reusable, versioned baseline file |
+-- MAGIC | **Lakehouse Federation** | Create a foreign catalog over Oracle via Lakehouse Federation; run baseline queries directly from Databricks SQL | Simplest workflow — no file export needed; requires JDBC connectivity to Oracle |
+-- MAGIC
+-- MAGIC The Federation approach is generally preferred when connectivity is available: it eliminates the export/import step and lets you run Oracle and Databricks queries side-by-side in the same notebook.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Aggregation Validation
+-- MAGIC
+-- MAGIC Numeric columns require sum, average, and distribution validation to ensure data integrity through the migration.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Floating Point Tolerance</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">When comparing <code>FLOAT</code> or <code>DOUBLE</code> aggregations between systems, use a tolerance threshold (e.g., 0.0001%) rather than exact matching. Differences in precision handling between Oracle and Spark can cause minor discrepancies that are mathematically insignificant.</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><strong>Note:</strong> Oracle's <code>FLOAT</code> is always 64-bit double precision, while Spark distinguishes <code>FLOAT</code> (32-bit) from <code>DOUBLE</code> (64-bit). Comparing Oracle <code>FLOAT</code> to Spark <code>FLOAT</code> (rather than <code>DOUBLE</code>) will produce larger discrepancies.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 4. Testing Frameworks
+-- MAGIC
+-- MAGIC Automated testing frameworks provide repeatable, CI/CD-integrated validation. The table below maps common approaches.
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle Approach</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks Approach</span> | Use Case |
+-- MAGIC |----------------------|--------------------------|----------|
+-- MAGIC | `CHECK` constraints | **Delta Constraints / Lakeflow Spark Declarative Pipelines Expectations** | Enforced data quality at write time |
+-- MAGIC | Custom stored procedures | **pytest + PySpark** | Unit testing transformations |
+-- MAGIC | Manual SQL queries | **Manual SQL queries / Chispa** | Ad-hoc validation, DataFrame equality |
+-- MAGIC | Oracle EDQ / Informatica DQ | **Lakebridge Reconciler / Great Expectations** | Enterprise data profiling and quality rules |
+-- MAGIC | Talend / Qlik DQ | **Lakeflow Spark Declarative Pipelines Expectations** | In-pipeline quality checks and monitoring |
+-- MAGIC | Great Expectations | **Great Expectations** | Comprehensive data quality rules |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### DataFrame Equality Testing: Chispa and PySpark Built-in
+-- MAGIC
+-- MAGIC Two options exist for DataFrame equality testing in PySpark:
+-- MAGIC
+-- MAGIC | Library | Availability | Best For |
+-- MAGIC |---------|--------------|----------|
+-- MAGIC | **Chispa** | External (`pip install chispa`) | PySpark 2.4+, detailed diffs, flexible comparison options |
+-- MAGIC | **`pyspark.testing.assertDataFrameEqual`** | Built-in | PySpark 3.5+, zero dependencies, simple comparisons |
+-- MAGIC
+-- MAGIC Both libraries collect DataFrames to the driver for comparison, so they're suitable for **unit tests on small datasets only**—not production-scale validation. For large tables, use SQL-based aggregate comparison or Lakebridge Reconciler.
+-- MAGIC
+-- MAGIC **Chispa advantages:**
+-- MAGIC - Better error messages showing exactly which rows/columns differ
+-- MAGIC - Built-in `precision` parameter for floating-point tolerance
+-- MAGIC - `ignore_column_order`, `ignore_row_order`, `ignore_nullable` options
+-- MAGIC - Supports older PySpark versions
+-- MAGIC
+-- MAGIC **Built-in advantages:**
+-- MAGIC - No external dependency
+-- MAGIC - Native integration with PySpark test tooling
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC #### Chispa Example
+-- MAGIC
+-- MAGIC Chispa integrates with pytest for CI/CD pipelines and provides detailed diff output when comparisons fail.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC #### PySpark Built-in Example
+-- MAGIC
+-- MAGIC For PySpark 3.5+, the built-in `assertDataFrameEqual` provides functionality similar to Chispa without external dependencies.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Driver-Only Execution: Chispa and assertDataFrameEqual</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Both <strong>Chispa</strong> and <strong><code>pyspark.testing.assertDataFrameEqual</code></strong> execute on the <strong>driver only</strong>—they call <code>.collect()</code> to bring both DataFrames into driver memory for row-by-row comparison. This is ideal for unit testing transformations with small sample data, but will OOM on large tables.</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><strong>For production-scale migration validation, use distributed approaches:</strong></p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>SQL aggregate comparison (<code>COUNT</code>, <code>SUM</code>, <code>MIN</code>, <code>MAX</code>)</li>
+-- MAGIC                 <li><code>EXCEPT</code> queries for row-level diff detection</li>
+-- MAGIC                 <li>Hash-based comparison (<code>md5(concat_ws('|', *))</code>)</li>
+-- MAGIC                 <li>Lakebridge Reconciler for automated schema, row, and data reconciliation</li>
+-- MAGIC                 <li>Lakeflow Spark Declarative Pipelines Expectations for runtime data quality enforcement</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Great Expectations: Comprehensive Data Quality
+-- MAGIC
+-- MAGIC Great Expectations provides a declarative approach to defining data quality expectations. It supports Databricks natively and can generate validation reports.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Great Expectations Requirements</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">GE requires <strong>Classic Compute</strong> - it uses table persistence operations not supported on serverless. Additionally, GE's Spark integration collects data to the driver for validation, which can cause OOM on large datasets. Use for sample validation only, not full-table scans.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Great Expectations Code (Classic Compute Only)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="python">
+-- MAGIC # install Great Expectations package
+-- MAGIC %pip install great_expectations
+-- MAGIC <br/>
+-- MAGIC import great_expectations as gx
+-- MAGIC <br/>
+-- MAGIC context = gx.get_context(mode="ephemeral")
+-- MAGIC data_source = context.data_sources.add_spark(name="spark_datasource")
+-- MAGIC <br/>
+-- MAGIC # Create data asset and batch definition
+-- MAGIC data_asset = data_source.add_dataframe_asset(name="order_header")
+-- MAGIC batch_definition = data_asset.add_batch_definition_whole_dataframe("order_header_batch")
+-- MAGIC <br/>
+-- MAGIC # Load DataFrame and get batch
+-- MAGIC df = spark.table("migration_dev.tasty_bytes_raw.order_header")
+-- MAGIC batch = batch_definition.get_batch(batch_parameters={"dataframe": df})
+-- MAGIC <br/>
+-- MAGIC # Oracle baseline count (from earlier validation)
+-- MAGIC oracle_row_count = 248265  # Replace with actual value from source
+-- MAGIC <br/>
+-- MAGIC # Create and test expectations
+-- MAGIC expectations = [
+-- MAGIC     gx.expectations.ExpectTableRowCountToEqual(value=oracle_row_count),
+-- MAGIC     gx.expectations.ExpectColumnValuesToBeUnique(column="order_id"),
+-- MAGIC     gx.expectations.ExpectColumnValuesToNotBeNull(column="order_id"),
+-- MAGIC     gx.expectations.ExpectColumnValuesToBeInSet(
+-- MAGIC         column="order_channel",
+-- MAGIC         value_set=["MOBILE", "WEB", "POS", "KIOSK", "DELIVERY"]
+-- MAGIC     )
+-- MAGIC ]
+-- MAGIC <br/>
+-- MAGIC # Run validations
+-- MAGIC for expectation in expectations:
+-- MAGIC     result = batch.validate(expectation)
+-- MAGIC     status = "✓" if result.success else "✗"
+-- MAGIC     print(f"{status} {result.expectation_config.expectation_type}: {result.result}")
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'python';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 5. Delta Table Constraints
+-- MAGIC
+-- MAGIC Delta Lake supports `CHECK` constraints that enforce data quality rules at write time. Unlike validation queries that run after data loads, constraints prevent invalid data from being written.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks Delta</span> | Enforcement |
+-- MAGIC |-----------|-------------------|-------------|
+-- MAGIC | `NOT NULL` | `NOT NULL` | **Both enforced** |
+-- MAGIC | `PRIMARY KEY` | `PRIMARY KEY` | Oracle: enforced; Databricks: informational |
+-- MAGIC | `FOREIGN KEY` | `FOREIGN KEY` | Oracle: enforced; Databricks: informational |
+-- MAGIC | `UNIQUE` | `UNIQUE` (preview) | Oracle: enforced; Databricks: preview |
+-- MAGIC | `CHECK (expr)` | `CHECK (expr)` | **Both enforced** |
+-- MAGIC | Default values | `DEFAULT expr` | Both applied at insert |
+-- MAGIC
+-- MAGIC Note: to use `UNIQUE` on Databricks, you must enable the following Spark configuration: `spark.databricks.sql.dsv2.unique.enabled`
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Constraint Enforcement Timing</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><code>CHECK</code> constraints are validated against <strong>existing data</strong> when added. If any rows violate the constraint, the <code>ALTER TABLE</code> will fail. Fix data quality issues before adding constraints, or use validation queries to identify violations first. Use <code>ALTER TABLE ... DROP CONSTRAINT</code> to remove constraints if needed during migration troubleshooting.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Comprehensive Validation Report
+-- MAGIC
+-- MAGIC Generate a single validation report comparing source and target metrics across all migrated tables.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 7. Extracting Test Logic from Oracle
+-- MAGIC
+-- MAGIC If your Oracle environment has existing data quality checks, extract these for conversion to Databricks. Data quality logic in Oracle is commonly defined in:
+-- MAGIC
+-- MAGIC | Oracle DQ Method | Description | Extraction Approach |
+-- MAGIC |---------------------|-------------|---------------------|
+-- MAGIC | **Custom Audit Frameworks** | Enterprise automated quality monitoring using custom PL/SQL (Oracle's procedural SQL language) frameworks scheduled on tables | Query custom audit tables (e.g. `DATA_QUALITY_LOG`) for historical metrics |
+-- MAGIC | **Stored Procedures** | Custom validation logic in PL/SQL | Export procedure definitions via `DBMS_METADATA.GET_DDL('PROCEDURE', ...)` (Oracle's DDL extraction utility) |
+-- MAGIC | **Scheduler Jobs** | Scheduled quality checks or alerting workflows | Export job definitions via `DBA_SCHEDULER_JOBS` |
+-- MAGIC | **GoldenGate / CDC** | Change data capture for incremental validation | Document extract/replicat configurations for CDF / `STREAMING TABLE` conversion |
+-- MAGIC | **dbt Tests** | Schema tests, custom tests, and data contracts | Migrate directly to dbt-databricks with minimal changes |
+-- MAGIC | **`CHECK` Constraints** | Enforced at the database level in Oracle | Convert to enforced Delta `CHECK` constraints |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #2196f3; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #1565c0; font-size: 1.1em;">Oracle Custom Audit Frameworks</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Unlike some newer platforms, Oracle Data Quality is typically implemented via custom <strong>PL/SQL Audit Frameworks</strong>, constraints with <code>DBMS_ERRLOG</code>, or third-party tools like Informatica Data Quality. If your source environment uses custom audit tables (e.g. tracking NULLs, duplicates, row counts), query these log tables as part of your baseline extraction before migration.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 8. CI/CD Integration with pytest
+-- MAGIC
+-- MAGIC For automated validation in CI/CD pipelines, structure tests using pytest with PySpark fixtures.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### `pytest` Example
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Python: pytest validation tests</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="python">
+-- MAGIC # tests/test_migration_validation.py
+-- MAGIC import pytest
+-- MAGIC from pyspark.sql import SparkSession
+-- MAGIC from pyspark.sql import functions as F
+-- MAGIC <br/>
+-- MAGIC @pytest.fixture(scope="session")
+-- MAGIC def spark():
+-- MAGIC     return SparkSession.builder.getOrCreate()
+-- MAGIC <br/>
+-- MAGIC def test_employees_row_count(spark):
+-- MAGIC     """Verify employees row count matches expected baseline."""
+-- MAGIC     expected_count = spark.table("oracle_federation_catalog.HR.EMPLOYEES").count()
+-- MAGIC     actual_count = spark.table("migration_dev.hr_raw.employees").count()
+-- MAGIC     assert actual_count == expected_count, f"Row count mismatch: {actual_count} vs {expected_count}"
+-- MAGIC <br/>
+-- MAGIC def test_employees_no_duplicate_pks(spark):
+-- MAGIC     """Verify no duplicate primary keys."""
+-- MAGIC     df = spark.table("migration_dev.hr_raw.employees")
+-- MAGIC     total = df.count()
+-- MAGIC     distinct = df.select("employee_id").distinct().count()
+-- MAGIC     assert total == distinct, f"Duplicate PKs found: {total - distinct} duplicates"
+-- MAGIC <br/>
+-- MAGIC def test_salary_bounds(spark):
+-- MAGIC     """Verify order_total within valid range."""
+-- MAGIC     df = spark.table("migration_dev.hr_raw.employees")
+-- MAGIC     violations = df.filter((F.col("salary") <= 0) | (F.col("salary") > 100_000)).count()
+-- MAGIC     assert violations == 0, f"Found {violations} rows with salary out of bounds"
+-- MAGIC <br/>
+-- MAGIC def test_manager_id_not_null(spark):
+-- MAGIC     """Manager_id can only be null for AD_PRES president."""
+-- MAGIC     df = spark.table("migration_dev.hr_raw.employees")
+-- MAGIC     null_pks = employees.filter(F.col("manager_id").isNull() & (F.col("job_id") != "AD_PRES")).count()
+-- MAGIC     assert null_pks == 0, f"Found {null_pks} null manager_id keys"
+-- MAGIC <br/>
+-- MAGIC def test_phone_valid_values(spark):
+-- MAGIC     """Verify phone_number contains only valid values."""
+-- MAGIC     df = spark.table("migration_dev.hr_raw.employees")
+-- MAGIC     pattern = r"^(?:\d{3}\.\d{3}\.\d{4}|\d{3}\.\d{2}\.\d{4}\.\d{6})$"
+-- MAGIC     invalid = employees.filter(~F.col("PHONE_NUMBER").rlike(pattern))
+-- MAGIC     assert invalid == 0, f"Found {invalid} rows with invalid phone_number"
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 DAB: databricks.yml configuration</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC # databricks.yml
+-- MAGIC bundle:
+-- MAGIC   name: migration-validation
+-- MAGIC <br/>
+-- MAGIC artifacts:
+-- MAGIC   default:
+-- MAGIC     type: whl
+-- MAGIC     build: poetry build
+-- MAGIC     path: .
+-- MAGIC <br/>
+-- MAGIC resources:
+-- MAGIC   jobs:
+-- MAGIC     validation_tests:
+-- MAGIC       name: migration-validation-tests
+-- MAGIC       tasks:
+-- MAGIC         - task_key: run_pytest
+-- MAGIC           new_cluster:
+-- MAGIC             spark_version: 17.3.x-scala2.12
+-- MAGIC             node_type_id: i3.xlarge
+-- MAGIC             data_security_mode: USER_ISOLATION
+-- MAGIC             num_workers: 1
+-- MAGIC           python_wheel_task:
+-- MAGIC             entry_point: pytest
+-- MAGIC             package_name: migration_tests
+-- MAGIC           libraries:
+-- MAGIC             - whl: ./dist/*.whl
+-- MAGIC             - pypi:
+-- MAGIC                 package: pytest
+-- MAGIC <br/>
+-- MAGIC targets:
+-- MAGIC   dev:
+-- MAGIC     workspace:
+-- MAGIC       host: https://your-workspace.cloud.databricks.com
+-- MAGIC   prod:
+-- MAGIC     workspace:
+-- MAGIC       host: https://your-prod-workspace.cloud.databricks.com
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 GitHub Actions: CI/CD workflow</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC # .github/workflows/migration-validation.yml
+-- MAGIC name: Migration Validation
+-- MAGIC <br/>
+-- MAGIC on:
+-- MAGIC   push:
+-- MAGIC     branches: [main]
+-- MAGIC   pull_request:
+-- MAGIC     branches: [main]
+-- MAGIC   workflow_dispatch:  # Allow manual trigger
+-- MAGIC <br/>
+-- MAGIC jobs:
+-- MAGIC   validate:
+-- MAGIC     runs-on: ubuntu-latest
+-- MAGIC <br/>    
+-- MAGIC     steps:
+-- MAGIC       - name: Checkout repository
+-- MAGIC         uses: actions/checkout@v4
+-- MAGIC <br/>      
+-- MAGIC       - name: Set up Python
+-- MAGIC         uses: actions/setup-python@v5
+-- MAGIC         with:
+-- MAGIC           python-version: '3.10'
+-- MAGIC <br/>      
+-- MAGIC       - name: Install Databricks CLI
+-- MAGIC         uses: databricks/setup-cli@main
+-- MAGIC <br/>      
+-- MAGIC       - name: Install dependencies
+-- MAGIC         run: pip install poetry && poetry install
+-- MAGIC <br/>      
+-- MAGIC       - name: Deploy bundle
+-- MAGIC         env:
+-- MAGIC           DATABRICKS_HOST: ${{secrets}}
+-- MAGIC           DATABRICKS_TOKEN: ${{secrets}}
+-- MAGIC         run: databricks bundle deploy -t dev
+-- MAGIC <br/>      
+-- MAGIC       - name: Run validation tests
+-- MAGIC         env:
+-- MAGIC           DATABRICKS_HOST: ${{secrets}}
+-- MAGIC           DATABRICKS_TOKEN: ${{secrets}}
+-- MAGIC         run: databricks bundle run validation_tests -t dev
+-- MAGIC <br/>      
+-- MAGIC       - name: Check results
+-- MAGIC         if: failure()
+-- MAGIC         run: echo "Migration validation failed - check Databricks job logs"
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-toml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'python';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 9. Lakebridge Reconciler
+-- MAGIC
+-- MAGIC Lakebridge is a Databricks Labs tool that automates schema and data reconciliation between source systems (Oracle, SQL Server, Synapse, and others) and Databricks.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph LB["Lakebridge Reconciler"]
+-- MAGIC         CFG["configure-reconcile"]
+-- MAGIC         REC["reconcile"]
+-- MAGIC         AGG["aggregates-reconcile"]
+-- MAGIC         RPT["AI/BI Dashboard"]
+-- MAGIC     end
+-- MAGIC     subgraph SRC["Oracle Source"]
+-- MAGIC         SF_TBL["Source Tables"]
+-- MAGIC     end
+-- MAGIC     subgraph TGT["Databricks Target"]
+-- MAGIC         DB_TBL["Target Tables"]
+-- MAGIC     end
+-- MAGIC     SF_TBL --> CFG
+-- MAGIC     DB_TBL --> CFG
+-- MAGIC     CFG --> REC
+-- MAGIC     CFG --> AGG
+-- MAGIC     REC --> RPT
+-- MAGIC     AGG --> RPT
+-- MAGIC     style LB fill:#fff,stroke:#607d8b,stroke-width:2px
+-- MAGIC     style SRC fill:#fff,stroke:#29B5E8,stroke-width:2px
+-- MAGIC     style TGT fill:#fff,stroke:#FF3621,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Classic Compute Required</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Lakebridge reconcile requires <strong>Classic Compute</strong>-serverless compute is not supported.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Reconciliation Report Types
+-- MAGIC
+-- MAGIC | Report Type | Description |
+-- MAGIC |-------------|-------------|
+-- MAGIC | **schema** | Compares column names and data types using sqlglot transpilation |
+-- MAGIC | **row** | Compares row counts, identifies missing rows in source or target |
+-- MAGIC | **data** | Full data comparison with value-level mismatch detection |
+-- MAGIC | **all** | Runs schema + row + data reconciliation |
+-- MAGIC | **aggregate** | Compares aggregate values (`MIN`, `MAX`, `COUNT`, `SUM`, `AVG`, `MEAN`, `MODE`, `STDDEV`, `VARIANCE`, `MEDIAN`) |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Configuration
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Interactive Setup</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC # Install lakebridge
+-- MAGIC databricks labs install lakebridge
+-- MAGIC <br/>
+-- MAGIC # Interactive configuration - prompts for source, target, secrets, metadata location
+-- MAGIC databricks labs lakebridge configure-reconcile
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Run Reconciliation</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC # Full reconciliation (schema + row + data)
+-- MAGIC databricks labs lakebridge reconcile
+-- MAGIC <br/>
+-- MAGIC # Aggregate-only reconciliation (for large tables)
+-- MAGIC databricks labs lakebridge aggregates-reconcile
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'bash';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Output
+-- MAGIC
+-- MAGIC Results are persisted to Delta tables and visualized in auto-deployed dashboards. Each run generates a unique `recon_id` for tracking.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">📝</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Documentation</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">For complete configuration options see <a href="https://databrickslabs.github.io/lakebridge/docs/reconcile/" target="_blank">Lakebridge Reconcile Documentation</a>.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### AI/BI Dashboards
+-- MAGIC
+-- MAGIC Lakebridge automatically provisions dashboards to visualize reconciliation results.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Lakebridge Reconciliation Dashboards</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Running <code>configure-reconcile</code> deploys two SQL dashboards:</p>
+-- MAGIC             <p style="margin: 12px 0 4px 0; color: #333;"><strong>Reconciliation Metrics</strong></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><strong>Summary Table</strong> - status, missing_in_source/target, absolute_mismatch, threshold_mismatch, mismatch_columns, schema_comparison</li>
+-- MAGIC                 <li><strong>Schema Details</strong> - source vs Databricks column names and datatypes with is_valid flag</li>
+-- MAGIC                 <li><strong>Drill Down</strong> - sample records for mismatches and missing entries</li>
+-- MAGIC                 <li><strong>Daily Validation Report</strong> - total failed runs, failed/successful target tables</li>
+-- MAGIC                 <li><strong>Trend Charts</strong> - mismatched records, threshold mismatches, missing in Databricks/source over time</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 12px 0 4px 0; color: #333;"><strong>Aggregate Reconciliation Metrics</strong></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><strong>Summary Table</strong> - aggregate function results (<code>SUM</code>, <code>COUNT</code>, etc.), group_by_columns, status</li>
+-- MAGIC                 <li><strong>Drill Down</strong> - source_value vs target_value with match status</li>
+-- MAGIC                 <li><strong>Trend Charts</strong> - aggregate mismatches and missing records over time</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 12px 0 0 0; color: #333;"><strong>Filters:</strong> recon_id, report_type, source_type, source/target table, executed_by, date range, category, aggregate_type</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Handling Type Differences with Transformations
+-- MAGIC
+-- MAGIC When Oracle and Databricks store data with different precision or formatting, use transformations to normalize values before comparison.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Example: Lakebridge transformation configuration</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="json">
+-- MAGIC {
+-- MAGIC   "source_name": "employees",
+-- MAGIC   "target_name": "employees",
+-- MAGIC   "join_columns": ["employee_id"],
+-- MAGIC   "transformations": [
+-- MAGIC     {
+-- MAGIC       "column_name": "hire_date",
+-- MAGIC       "source": "TO_CHAR(HIRE_DATE, 'yyyy-mm-dd')",
+-- MAGIC       "target": "date_format(hire_date, "yyyy-MM-dd")"
+-- MAGIC     },
+-- MAGIC   ]
+-- MAGIC }
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <p style="margin-top: 12px; color: #666; font-size: 0.9em;"><strong>Note:</strong> The <code>source</code> SQL must be valid Oracle syntax; <code>target</code> must be valid Databricks SQL syntax. You can also sepcify column-wise tolerances for comparison.</p>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'json';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Data Validation Checklist</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Row counts match between Oracle and Databricks</li>
+-- MAGIC                 <li>Numeric aggregations within tolerance thresholds (account for IEEE 754 floating point differences)</li>
+-- MAGIC                 <li>Null distributions unchanged</li>
+-- MAGIC                 <li>Primary key uniqueness verified</li>
+-- MAGIC                 <li>Schema validation passed (column names and data types match)</li>
+-- MAGIC                 <li>Existing Oracle DQ logic extracted (PL/SQL stored procedures, Scheduler jobs, <code>DBMS_ERRLOG</code> error log tables (Oracle's DML error logging utility), dbt tests)</li>
+-- MAGIC                 <li><code>CHECK</code> constraints added for critical columns (Delta enforces at write time)</li>
+-- MAGIC                 <li>Validation baseline exported to stage for repeatable comparison</li>
+-- MAGIC                 <li>Automated tests integrated with CI/CD (DAB + pytest or equivalent)</li>
+-- MAGIC                 <li>Lakebridge Reconcile configured and executed</li>
+-- MAGIC                 <li>Reconciliation dashboards reviewed - no schema/row/data/aggregate failures</li>
+-- MAGIC                 <li>Transformations configured for type differences (decimal precision, timestamp formats)</li>                
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Summary
+-- MAGIC
+-- MAGIC This notebook covered multiple approaches to validating data migrated from Oracle to Databricks, from manual SQL queries to fully automated reconciliation tooling.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Validation Strategy Selection
+-- MAGIC
+-- MAGIC Choose your validation approach based on automation needs and compute requirements.
+-- MAGIC
+-- MAGIC | Approach | When to Use | Compute Requirement |
+-- MAGIC |----------|-------------|---------------------|
+-- MAGIC | **SQL Comparison Queries** | Ad-hoc validation, initial checks | Serverless or Classic |
+-- MAGIC | **Lakebridge Reconcile** | Production migration validation | Classic Compute only |
+-- MAGIC | **pytest + PySpark** | CI/CD integration, regression testing | Serverless or Classic |
+-- MAGIC | **Delta CHECK Constraints** | Enforced data quality at write time | Automatic (any compute) |
+-- MAGIC | **Great Expectations** | Comprehensive data quality rules | Classic Compute only |
+-- MAGIC | **Chispa** | DataFrame equality in unit tests | Classic (collects to driver) |
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Key Takeaways
+-- MAGIC
+-- MAGIC - **Baseline Extraction** - Export Oracle metrics to stage using `DBMS_CLOUD.EXPORT_DATA` and `ALL_TABLES` for comparison
+-- MAGIC - **Automated Reconciliation** - Use Lakebridge Reconcile for schema, row, data, and aggregate comparison with built-in dashboards
+-- MAGIC - **Data Parity** - Validate counts, sums, nulls, and bounds using Databricks SQL or PySpark (apply floating point tolerance for numeric comparisons)
+-- MAGIC - **Schema Validation** - Compare column names, data types, and constraints using system tables, Lakehouse Federation and `information_schema` or Lakebridge schema reports
+-- MAGIC - **DQ Logic Migration** - Extract existing checks from Oracle (custom audits, stored procedures, scheduler jobs) for conversion
+-- MAGIC - **Automated Testing** - Integrate repeatable validation with CI/CD using DAB + pytest
+-- MAGIC - **Runtime Enforcement** - Use Delta `CHECK` constraints to prevent invalid data writes (enforced, unlike Oracle)
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## References
+-- MAGIC
+-- MAGIC Documentation and tools referenced in this notebook.
+-- MAGIC
+-- MAGIC - [Lakebridge Documentation](https://databrickslabs.github.io/lakebridge/docs/overview/)
+-- MAGIC - [Lakebridge Reconcile Guide](https://databrickslabs.github.io/lakebridge/docs/reconcile/)
+-- MAGIC - [Databricks Constraints](https://docs.databricks.com/aws/en/tables/constraints)
+-- MAGIC - [Oracle DBMS_ERRLOG Documentation](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_ERRLOG.html)
+-- MAGIC - [Oracle ALL_OBJECTS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/ALL_OBJECTS.html)
+-- MAGIC - [Declarative Automation Bundles](https://docs.databricks.com/en/dev-tools/bundles/index.html)
+-- MAGIC - [pytest Documentation](https://docs.pytest.org/en/stable/)
+-- MAGIC - [Chispa GitHub](https://github.com/MrPowers/chispa)
+-- MAGIC - [Great Expectations](https://greatexpectations.io/)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

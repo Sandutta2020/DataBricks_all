@@ -1,0 +1,150 @@
+-- Databricks notebook source
+-- MAGIC %run ./Classroom-Setup-Common
+
+-- COMMAND ----------
+
+DROP SCHEMA IF EXISTS lab_3 CASCADE;
+CREATE SCHEMA IF NOT EXISTS lab_3;
+USE SCHEMA lab_3;
+CREATE VOLUME IF NOT EXISTS employees_landing;
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC
+-- MAGIC from pyspark.sql.types import StructType, StructField, IntegerType, StringType, DoubleType, DateType
+-- MAGIC from datetime import date
+-- MAGIC
+-- MAGIC schema = StructType([
+-- MAGIC     StructField("EMPLOYEE_ID", IntegerType()),
+-- MAGIC     StructField("FIRST_NAME", StringType()),
+-- MAGIC     StructField("LAST_NAME", StringType()),
+-- MAGIC     StructField("EMAIL", StringType()),
+-- MAGIC     StructField("PHONE_NUMBER", StringType()),
+-- MAGIC     StructField("HIRE_DATE", DateType()),
+-- MAGIC     StructField("JOB_ID", StringType()),
+-- MAGIC     StructField("SALARY", IntegerType()),
+-- MAGIC     StructField("COMMISSION_PCT", DoubleType()),
+-- MAGIC     StructField("MANAGER_ID", IntegerType()),
+-- MAGIC     StructField("DEPARTMENT_ID", IntegerType()),
+-- MAGIC ])
+-- MAGIC
+-- MAGIC data = [
+-- MAGIC     (100, "Steven", "King", "SKING", "515.123.4567", date(2003, 6, 17), "AD_PRES", 24000, None, None, 90),
+-- MAGIC     (101, "Neena", "Kochhar", "NKOCHHAR", "515.123.4568", date(2005, 9, 21), "AD_VP", 17000, None, 100, 90),
+-- MAGIC     (102, "Lex", "De Haan", "LDEHAAN", "515.123.4569", date(2001, 1, 13), "AD_VP", 17000, None, 100, 90),
+-- MAGIC     (103, "Alexander", "Hunold", "AHUNOLD", "590.423.4567", date(2006, 1, 3), "IT_PROG", 9000, None, 102, 60),
+-- MAGIC     (104, "Bruce", "Ernst", "BERNST", "590.423.4568", date(2007, 5, 21), "IT_PROG", 6000, None, 103, 60),
+-- MAGIC     (105, "David", "Austin", "DAUSTIN", "590.423.4569", date(2005, 6, 25), "IT_PROG", 4800, None, 103, 60),
+-- MAGIC     (106, "Valli", "Pataballa", "VPATABAL", "590.423.4560", date(2006, 2, 5), "IT_PROG", 4800, None, 103, 60),
+-- MAGIC     (107, "Diana", "Lorentz", "DLORENTZ", "590.423.5567", date(2007, 2, 7), "IT_PROG", 4200, None, 103, 60),
+-- MAGIC     (108, "Nancy", "Greenberg", "NGREENBE", "515.124.4569", date(2002, 8, 17), "FI_MGR", 12008, None, 101, 100),
+-- MAGIC     (109, "Daniel", "Faviet", "DFAVIET", "515.124.4169", date(2002, 8, 16), "FI_ACCOUNT", 9000, None, 108, 100),
+-- MAGIC     (110, "John", "Chen", "JCHEN", "515.124.4269", date(2005, 9, 28), "FI_ACCOUNT", 8200, None, 108, 100),
+-- MAGIC     (111, "Ismael", "Sciarra", "ISCIARRA", "515.124.4369", date(2005, 9, 30), "FI_ACCOUNT", 7700, None, 108, 100),
+-- MAGIC     (112, "Jose Manuel", "Urman", "JMURMAN", "515.124.4469", date(2006, 3, 7), "FI_ACCOUNT", 7800, None, 108, 100),
+-- MAGIC     (113, "Luis", "Popp", "LPOPP", "515.124.4567", date(2007, 12, 7), "FI_ACCOUNT", 6900, None, 108, 100),
+-- MAGIC     (114, "Den", "Raphaely", "DRAPHEAL", "515.127.4561", date(2002, 12, 7), "PU_MAN", 11000, None, 100, 30),
+-- MAGIC     (115, "Alexander", "Khoo", "AKHOO", "515.127.4562", date(2003, 5, 18), "PU_CLERK", 3100, None, 114, 30),
+-- MAGIC     (116, "Shelli", "Baida", "SBAIDA", "515.127.4563", date(2005, 12, 24), "PU_CLERK", 2900, None, 114, 30),
+-- MAGIC     (117, "Sigal", "Tobias", "STOBIAS", "515.127.4564", date(2005, 7, 24), "PU_CLERK", 2800, None, 114, 30),
+-- MAGIC     (118, "Guy", "Himuro", "GHIMURO", "515.127.4565", date(2006, 11, 15), "PU_CLERK", 2600, None, 114, 30),
+-- MAGIC     (119, "Karen", "Colmenares", "KCOLMENA", "515.127.4566", date(2007, 8, 10), "PU_CLERK", 2500, None, 114, 30),
+-- MAGIC     (120, "Matthew", "Weiss", "MWEISS", "650.123.1234", date(2004, 7, 18), "ST_MAN", 8000, None, 100, 50),
+-- MAGIC     (121, "Adam", "Fripp", "AFRIPP", "650.123.2234", date(2005, 4, 10), "ST_MAN", 8200, None, 100, 50),
+-- MAGIC     (122, "Payam", "Kaufling", "PKAUFLIN", "650.123.3234", date(2003, 5, 1), "ST_MAN", 7900, None, 100, 50),
+-- MAGIC     (123, "Shanta", "Vollman", "SVOLLMAN", "650.123.4234", date(2005, 10, 10), "ST_MAN", 6500, None, 100, 50),
+-- MAGIC     (124, "Kevin", "Mourgos", "KMOURGOS", "650.123.5234", date(2007, 11, 16), "ST_MAN", 5800, None, 100, 50),
+-- MAGIC     (125, "Julia", "Nayer", "JNAYER", "650.124.1214", date(2005, 7, 16), "ST_CLERK", 3200, None, 120, 50),
+-- MAGIC     (126, "Irene", "Mikkilineni", "IMIKKILI", "650.124.1224", date(2006, 9, 28), "ST_CLERK", 2700, None, 120, 50),
+-- MAGIC     (127, "James", "Landry", "JLANDRY", "650.124.1334", date(2007, 1, 14), "ST_CLERK", 2400, None, 120, 50),
+-- MAGIC     (128, "Steven", "Markle", "SMARKLE", "650.124.1434", date(2008, 3, 8), "ST_CLERK", 2200, None, 120, 50),
+-- MAGIC     (129, "Laura", "Bissot", "LBISSOT", "650.124.5234", date(2005, 8, 20), "ST_CLERK", 3300, None, 121, 50),
+-- MAGIC     (130, "Mozhe", "Atkinson", "MATKINSO", "650.124.6234", date(2005, 10, 30), "ST_CLERK", 2800, None, 121, 50),
+-- MAGIC     (131, "James", "Marlow", "JAMRLOW", "650.124.7234", date(2005, 2, 16), "ST_CLERK", 2500, None, 121, 50),
+-- MAGIC     (132, "TJ", "Olson", "TJOLSON", "650.124.8234", date(2007, 4, 10), "ST_CLERK", 2100, None, 121, 50),
+-- MAGIC     (133, "Jason", "Mallin", "JMALLIN", "650.127.1934", date(2004, 6, 14), "ST_CLERK", 3300, None, 122, 50),
+-- MAGIC     (134, "Michael", "Rogers", "MROGERS", "650.127.1834", date(2006, 8, 26), "ST_CLERK", 2900, None, 122, 50),
+-- MAGIC     (135, "Ki", "Gee", "KGEE", "650.127.1734", date(2007, 12, 12), "ST_CLERK", 2400, None, 122, 50),
+-- MAGIC     (136, "Hazel", "Philtanker", "HPHILTAN", "650.127.1634", date(2008, 2, 6), "ST_CLERK", 2200, None, 122, 50),
+-- MAGIC     (137, "Renske", "Ladwig", "RLADWIG", "650.121.1234", date(2003, 7, 14), "ST_CLERK", 3600, None, 123, 50),
+-- MAGIC     (138, "Stephen", "Stiles", "SSTILES", "650.121.2034", date(2005, 10, 26), "ST_CLERK", 3200, None, 123, 50),
+-- MAGIC     (139, "John", "Seo", "JSEO", "650.121.2019", date(2006, 2, 12), "ST_CLERK", 2700, None, 123, 50),
+-- MAGIC     (140, "Joshua", "Patel", "JPATEL", "650.121.1834", date(2006, 4, 6), "ST_CLERK", 2500, None, 123, 50),
+-- MAGIC     (141, "Trenna", "Rajs", "TRAJS", "650.121.8009", date(2003, 10, 17), "ST_CLERK", 3500, None, 124, 50),
+-- MAGIC     (142, "Curtis", "Davies", "CDAVIES", "650.121.2994", date(2005, 1, 29), "ST_CLERK", 3100, None, 124, 50),
+-- MAGIC     (143, "Randall", "Matos", "RMATOS", "650.121.2874", date(2006, 3, 15), "ST_CLERK", 2600, None, 124, 50),
+-- MAGIC     (144, "Peter", "Vargas", "PVARGAS", "650.121.2004", date(2006, 7, 9), "ST_CLERK", 2500, None, 124, 50),
+-- MAGIC     (145, "John", "Russell", "JRUSSEL", "011.44.1344.429268", date(2004, 10, 1), "SA_MAN", 14000, 0.4, 100, 80),
+-- MAGIC     (146, "Karen", "Partners", "KPARTNER", "011.44.1344.467268", date(2005, 1, 5), "SA_MAN", 13500, 0.3, 100, 80),
+-- MAGIC     (147, "Alberto", "Errazuriz", "AERRAZUR", "011.44.1344.429278", date(2005, 3, 10), "SA_MAN", 12000, 0.3, 100, 80),
+-- MAGIC     (148, "Gerald", "Cambrault", "GCAMBRAU", "011.44.1344.619268", date(2007, 10, 15), "SA_MAN", 11000, 0.3, 100, 80),
+-- MAGIC     (149, "Eleni", "Zlotkey", "EZLOTKEY", "011.44.1344.429018", date(2008, 1, 29), "SA_MAN", 10500, 0.2, 100, 80),
+-- MAGIC     (150, "Peter", "Tucker", "PTUCKER", "011.44.1344.129268", date(2005, 1, 30), "SA_REP", 10000, 0.3, 145, 80),
+-- MAGIC     (151, "David", "Bernstein", "DBERNSTE", "011.44.1344.345268", date(2005, 3, 24), "SA_REP", 9500, 0.25, 145, 80),
+-- MAGIC     (152, "Peter", "Hall", "PHALL", "011.44.1344.478968", date(2005, 8, 20), "SA_REP", 9000, 0.25, 145, 80),
+-- MAGIC     (153, "Christopher", "Olsen", "COLSEN", "011.44.1344.498718", date(2006, 3, 30), "SA_REP", 8000, 0.2, 145, 80),
+-- MAGIC     (154, "Nanette", "Cambrault", "NCAMBRAU", "011.44.1344.987668", date(2006, 12, 9), "SA_REP", 7500, 0.2, 145, 80),
+-- MAGIC     (155, "Oliver", "Tuvault", "OTUVAULT", "011.44.1344.486508", date(2007, 11, 23), "SA_REP", 7000, 0.15, 145, 80),
+-- MAGIC     (156, "Janette", "King", "JKING", "011.44.1345.429268", date(2004, 1, 30), "SA_REP", 10000, 0.35, 146, 80),
+-- MAGIC     (157, "Patrick", "Sully", "PSULLY", "011.44.1345.929268", date(2004, 3, 4), "SA_REP", 9500, 0.35, 146, 80),
+-- MAGIC     (158, "Allan", "McEwen", "AMCEWEN", "011.44.1345.829268", date(2004, 8, 1), "SA_REP", 9000, 0.35, 146, 80),
+-- MAGIC     (159, "Lindsey", "Smith", "LSMITH", "011.44.1345.729268", date(2005, 3, 10), "SA_REP", 8000, 0.3, 146, 80),
+-- MAGIC     (160, "Louise", "Doran", "LDORAN", "011.44.1345.629268", date(2005, 12, 15), "SA_REP", 7500, 0.3, 146, 80),
+-- MAGIC     (161, "Sarath", "Sewall", "SSEWALL", "011.44.1345.529268", date(2006, 11, 3), "SA_REP", 7000, 0.25, 146, 80),
+-- MAGIC     (162, "Clara", "Vishney", "CVISHNEY", "011.44.1346.129268", date(2005, 11, 11), "SA_REP", 10500, 0.25, 147, 80),
+-- MAGIC     (163, "Danielle", "Greene", "DGREENE", "011.44.1346.229268", date(2007, 3, 19), "SA_REP", 9500, 0.15, 147, 80),
+-- MAGIC     (164, "Mattea", "Marvins", "MMARVINS", "011.44.1346.329268", date(2008, 1, 24), "SA_REP", 7200, 0.1, 147, 80),
+-- MAGIC     (165, "David", "Lee", "DLEE", "011.44.1346.529268", date(2008, 2, 23), "SA_REP", 6800, 0.1, 147, 80),
+-- MAGIC     (166, "Sundar", "Ande", "SANDE", "011.44.1346.629268", date(2008, 3, 24), "SA_REP", 6400, 0.1, 147, 80),
+-- MAGIC     (167, "Amit", "Banda", "ABANDA", "011.44.1346.729268", date(2008, 4, 21), "SA_REP", 6200, 0.1, 147, 80),
+-- MAGIC     (168, "Lisa", "Ozer", "LOZER", "011.44.1343.929268", date(2005, 3, 11), "SA_REP", 11500, 0.25, 148, 80),
+-- MAGIC     (169, "Harrison", "Bloom", "HBLOOM", "011.44.1343.829268", date(2006, 3, 23), "SA_REP", 10000, 0.2, 148, 80),
+-- MAGIC     (170, "Tayler", "Fox", "TFOX", "011.44.1343.729268", date(2006, 1, 24), "SA_REP", 9600, 0.2, 148, 80),
+-- MAGIC     (171, "William", "Smith", "WSMITH", "011.44.1343.629268", date(2007, 2, 23), "SA_REP", 7400, 0.15, 148, 80),
+-- MAGIC     (172, "Elizabeth", "Bates", "EBATES", "011.44.1343.529268", date(2007, 3, 24), "SA_REP", 7300, 0.15, 148, 80),
+-- MAGIC     (173, "Sundita", "Kumar", "SKUMAR", "011.44.1343.329268", date(2008, 4, 21), "SA_REP", 6100, 0.1, 148, 80),
+-- MAGIC     (174, "Ellen", "Abel", "EABEL", "011.44.1644.429267", date(2004, 5, 11), "SA_REP", 11000, 0.3, 149, 80),
+-- MAGIC     (175, "Alyssa", "Hutton", "AHUTTON", "011.44.1644.429266", date(2005, 3, 19), "SA_REP", 8800, 0.25, 149, 80),
+-- MAGIC     (176, "Jonathon", "Taylor", "JTAYLOR", "011.44.1644.429265", date(2006, 3, 24), "SA_REP", 8600, 0.2, 149, 80),
+-- MAGIC     (177, "Jack", "Livingston", "JLIVINGS", "011.44.1644.429264", date(2006, 4, 23), "SA_REP", 8400, 0.2, 149, 80),
+-- MAGIC     (178, "Kimberely", "Grant", "KGRANT", "011.44.1644.429263", date(2007, 5, 24), "SA_REP", 7000, 0.15, 149, None),
+-- MAGIC     (179, "Charles", "Johnson", "CJOHNSON", "011.44.1644.429262", date(2008, 1, 4), "SA_REP", 6200, 0.1, 149, 80),
+-- MAGIC     (180, "Winston", "Taylor", "WTAYLOR", "650.507.9876", date(2006, 1, 24), "SH_CLERK", 3200, None, 120, 50),
+-- MAGIC     (181, "Jean", "Fleaur", "JFLEAUR", "650.507.9877", date(2006, 2, 23), "SH_CLERK", 3100, None, 120, 50),
+-- MAGIC     (182, "Martha", "Sullivan", "MSULLIVA", "650.507.9878", date(2007, 6, 21), "SH_CLERK", 2500, None, 120, 50),
+-- MAGIC     (183, "Girard", "Geoni", "GGEONI", "650.507.9879", date(2008, 2, 3), "SH_CLERK", 2800, None, 120, 50),
+-- MAGIC     (184, "Nandita", "Sarchand", "NSARCHAN", "650.509.1876", date(2004, 1, 27), "SH_CLERK", 4200, None, 121, 50),
+-- MAGIC     (185, "Alexis", "Bull", "ABULL", "650.509.2876", date(2005, 2, 20), "SH_CLERK", 4100, None, 121, 50),
+-- MAGIC     (186, "Julia", "Dellinger", "JDELLING", "650.509.3876", date(2006, 6, 24), "SH_CLERK", 3400, None, 121, 50),
+-- MAGIC     (187, "Anthony", "Cabrio", "ACABRIO", "650.509.4876", date(2007, 2, 7), "SH_CLERK", 3000, None, 121, 50),
+-- MAGIC     (188, "Kelly", "Chung", "KCHUNG", "650.505.1876", date(2005, 6, 14), "SH_CLERK", 3800, None, 122, 50),
+-- MAGIC     (189, "Jennifer", "Dilly", "JDILLY", "650.505.2876", date(2005, 8, 13), "SH_CLERK", 3600, None, 122, 50),
+-- MAGIC     (190, "Timothy", "Gates", "TGATES", "650.505.3876", date(2006, 7, 11), "SH_CLERK", 2900, None, 122, 50),
+-- MAGIC     (191, "Randall", "Perkins", "RPERKINS", "650.505.4876", date(2007, 12, 19), "SH_CLERK", 2500, None, 122, 50),
+-- MAGIC     (192, "Sarah", "Bell", "SBELL", "650.501.1876", date(2004, 2, 4), "SH_CLERK", 4000, None, 123, 50),
+-- MAGIC     (193, "Britney", "Everett", "BEVERETT", "650.501.2876", date(2005, 3, 3), "SH_CLERK", 3900, None, 123, 50),
+-- MAGIC     (194, "Samuel", "McCain", "SMCCAIN", "650.501.3876", date(2006, 7, 1), "SH_CLERK", 3200, None, 123, 50),
+-- MAGIC     (195, "Vance", "Jones", "VJONES", "650.501.4876", date(2007, 3, 17), "SH_CLERK", 2800, None, 123, 50),
+-- MAGIC     (196, "Alana", "Walsh", "AWALSH", "650.507.9811", date(2006, 4, 24), "SH_CLERK", 3100, None, 124, 50),
+-- MAGIC     (197, "Kevin", "Feeney", "KFEENEY", "650.507.9822", date(2006, 5, 23), "SH_CLERK", 3000, None, 124, 50),
+-- MAGIC     (198, "Donald", "OConnell", "DOCONNEL", "650.507.9833", date(2007, 6, 21), "SH_CLERK", 2600, None, 124, 50),
+-- MAGIC     (199, "Douglas", "Grant", "DGRANT", "650.507.9844", date(2008, 1, 13), "SH_CLERK", 2600, None, 124, 50),
+-- MAGIC     (200, "Jennifer", "Whalen", "JWHALEN", "515.123.4444", date(2003, 9, 17), "AD_ASST", 4400, None, 101, 10),
+-- MAGIC     (201, "Michael", "Hartstein", "MHARTSTE", "515.123.5555", date(2004, 2, 17), "MK_MAN", 13000, None, 100, 20),
+-- MAGIC     (202, "Pat", "Fay", "PFAY", "603.123.6666", date(2005, 8, 17), "MK_REP", 6000, None, 201, 20),
+-- MAGIC     (203, "Susan", "Mavris", "SMAVRIS", "515.123.7777", date(2002, 6, 7), "HR_REP", 6500, None, 101, 40),
+-- MAGIC     (204, "Hermann", "Baer", "HBAER", "515.123.8888", date(2002, 6, 7), "PR_REP", 10000, None, 101, 70),
+-- MAGIC     (205, "Shelley", "Higgins", "SHIGGINS", "515.123.8080", date(2002, 6, 7), "AC_MGR", 12008, None, 101, 110),
+-- MAGIC     (206, "William", "Gietz", "WGIETZ", "515.123.8181", date(2002, 6, 7), "AC_ACCOUNT", 8300, None, 205, 110),
+-- MAGIC ]
+-- MAGIC
+-- MAGIC my_catalog = spark.sql("SELECT my_catalog").collect()[0][0]
+-- MAGIC
+-- MAGIC df = spark.createDataFrame(data, schema).coalesce(1).write.mode("overwrite").parquet(f"/Volumes/{my_catalog}/lab_3/employees_landing/employees.parquet")
+
+-- COMMAND ----------
+
+SELECT "lab_3" AS `Created Schema`,
+       "employees_landing" AS `Created Volume`,
+       "OK" AS Status;

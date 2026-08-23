@@ -1,0 +1,1735 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">04 - Activate</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="
+-- MAGIC   border-left: 4px solid #1976d2;
+-- MAGIC   background: #e3f2fd;
+-- MAGIC   padding: 14px 18px;
+-- MAGIC   border-radius: 4px;
+-- MAGIC   margin: 16px 0;
+-- MAGIC ">
+-- MAGIC   <strong style="display:block; color:#0d47a1; margin-bottom:6px; font-size: 1.1em;">
+-- MAGIC     Complete this Notebook in the Databricks Academy Provided Workspace
+-- MAGIC   </strong>
+-- MAGIC   <div style="color:#333;">
+-- MAGIC This notebook is designed to run in a Databricks Academy provided Vocareum workspace.
+-- MAGIC
+-- MAGIC Work through the notebook in sequence. Skipping steps may cause later sections to fail.
+-- MAGIC   </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Lab: Activation Phase
+-- MAGIC
+-- MAGIC This hands-on lab tests your understanding of the Activation phase. You will complete quizzes to reinforce key concepts and execute SQL/Python commands to validate data, configure monitoring, and prepare for cutover.
+-- MAGIC
+-- MAGIC **Lab Format:** Interactive quizzes + SQL/Python code exercises
+-- MAGIC
+-- MAGIC **Topics Covered:**
+-- MAGIC - Testing and Data Validation: Data parity checks, aggregation validation, DataFrame comparison
+-- MAGIC - Observability & Monitoring: System tables, lineage queries, Liquid Clustering optimization
+-- MAGIC - Cutover Execution: Cutover strategies, freeze procedures, task suspension
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Lab Setup (run this first)
+-- MAGIC
+-- MAGIC Run the following cell to create your unique lab catalog name. This variable will be used throughout the lab exercises to ensure each learner has their own isolated environment. A schema and a volume will be created, too.
+-- MAGIC
+-- MAGIC **Important:** You must run this cell before proceeding with any other exercises. 
+-- MAGIC
+-- MAGIC This lab uses the Oracle HR sample dataset. For the complete terms, see `assets/data/LICENSE.txt`.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Compute Requirements
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC   <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC     <span style="font-size: 24px;">🚨</span>
+-- MAGIC     <div>
+-- MAGIC       <strong style="color: #1565c0; font-size: 1.1em;">REQUIRED – SQL WAREHOUSE OR SERVERLESS COMPUTE</strong>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;">This notebook runs on both <strong>SQL Warehouse</strong> and <strong>Serverless compute</strong>. Select your preferred compute resource before executing any cells.</p>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;"><strong>Testing configuration:</strong> This demo was tested using SQL Warehouse</strong> and Serverless compute <strong>version 4</strong>. For more details on Serverless versions, see the <a href="https://docs.databricks.com/aws/en/compute/serverless/dependencies" style="color: #1565c0; text-decoration: none; font-weight: 500;">Databricks documentation</a>.</p>
+-- MAGIC     </div>
+-- MAGIC   </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Exercise Setup (SQL)
+-- MAGIC %run ../Includes/Classroom-Setup-Lab-4
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Testing and Data Validation
+-- MAGIC
+-- MAGIC In this lesson, you learned how to perform data parity validation between Oracle and Databricks, including record counts, aggregations, null checks, and DataFrame comparisons using testing frameworks.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 1: Data Parity Check Types
+-- MAGIC
+-- MAGIC Drag each validation type to what it checks during migration validation.
+-- MAGIC
+-- MAGIC <div id="parityCheckRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var concepts = [
+-- MAGIC         ["Record Counts", "Total rows per table match", "First validation step for every table"],
+-- MAGIC         ["Sum/Aggregations", "Numeric column totals match", "Financial and quantity columns"],
+-- MAGIC         ["Null Counts", "NULL distribution unchanged", "All columns, especially after transforms"],
+-- MAGIC         ["Distinct Counts", "Cardinality preserved", "Key columns and dimensions"],
+-- MAGIC         ["String Checksums", "Character data integrity", "Text columns and VARIANT conversions"],
+-- MAGIC         ["Min/Max Bounds", "Value ranges preserved", "Dates, timestamps, numeric ranges"],
+-- MAGIC         ["Hash Comparisons", "Row-level data integrity", "Critical tables, sample-based validation"]
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var matchedPairs = {};
+-- MAGIC     var draggedKey = null;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countMatched() {
+-- MAGIC         return Object.keys(matchedPairs).length;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('parityCheckRoot');
+-- MAGIC         var shuffledSources = shuffleArray(concepts);
+-- MAGIC         var shuffledTargets = shuffleArray(concepts);
+-- MAGIC         
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f9f9f9; border-radius: 12px; border: 1px solid #ddd; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">🎯 Drag & Drop: Validation Type → What It Checks</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 15px;">';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e8f5e9; color: #2e7d32;">✓ Matched: ' + countMatched() + '</span>';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e3f2fd; color: #1565c0;">○ Remaining: ' + (concepts.length - countMatched()) + '</span>';
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 40px; width: 100%;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0; text-align: center; margin-bottom: 12px;">Validation Type</div>';
+-- MAGIC         
+-- MAGIC         shuffledSources.forEach(function(src) {
+-- MAGIC             var srcKey = src[0];
+-- MAGIC             var isSourceMatched = matchedPairs[srcKey] !== undefined;
+-- MAGIC             
+-- MAGIC             var srcBg = isSourceMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var srcBorder = isSourceMatched ? '#4caf50' : '#1976d2';
+-- MAGIC             var srcCursor = isSourceMatched ? 'default' : 'grab';
+-- MAGIC             var srcOpacity = isSourceMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div draggable="' + (!isSourceMatched) + '" data-key="' + srcKey + '" class="drag-source" style="padding: 14px 20px; margin-bottom: 8px; background: ' + srcBg + '; border: 2px solid ' + srcBorder + '; border-radius: 8px; cursor: ' + srcCursor + '; font-size: 0.95em; color: #333; opacity: ' + srcOpacity + '; transition: all 0.15s ease;">' + srcKey + '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); color: #e65100; text-align: center; margin-bottom: 12px;">What It Checks</div>';
+-- MAGIC         
+-- MAGIC         shuffledTargets.forEach(function(tgt) {
+-- MAGIC             var tgtAnswer = tgt[0];
+-- MAGIC             var tgtLabel = tgt[1];
+-- MAGIC             var tgtHint = tgt[2];
+-- MAGIC             var isTargetMatched = false;
+-- MAGIC             var matchedWith = '';
+-- MAGIC             
+-- MAGIC             for (var key in matchedPairs) {
+-- MAGIC                 if (matchedPairs[key] === tgtAnswer) {
+-- MAGIC                     isTargetMatched = true;
+-- MAGIC                     matchedWith = key;
+-- MAGIC                     break;
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             var tgtBg = isTargetMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var tgtBorder = isTargetMatched ? '#4caf50' : '#ff9800';
+-- MAGIC             var tgtOpacity = isTargetMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div class="drop-target" data-answer="' + tgtAnswer + '" data-hint="' + tgtHint + '" style="padding: 14px 20px; margin-bottom: 8px; background: ' + tgtBg + '; border: 2px dashed ' + tgtBorder + '; border-radius: 8px; font-size: 0.95em; color: #333; opacity: ' + tgtOpacity + '; transition: all 0.15s ease; min-height: 24px;">';
+-- MAGIC             if (isTargetMatched) {
+-- MAGIC                 html += '<span style="color: #2e7d32; font-weight: 600;">✓ </span>';
+-- MAGIC             }
+-- MAGIC             html += tgtLabel;
+-- MAGIC             html += '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (countMatched() === concepts.length) {
+-- MAGIC             html += '<div style="margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 2px solid #4caf50; border-radius: 12px; text-align: center;">';
+-- MAGIC             html += '<div style="font-size: 2em; margin-bottom: 8px;">🎉</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; font-weight: 600; color: #2e7d32;">All Validation Types Matched!</div>';
+-- MAGIC             html += '<div style="color: #388e3c; margin-top: 4px;">You understand the key data parity check types for migration validation.</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 20px; padding-top: 16px; border-top: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<button id="resetMatchBtn" style="padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sources = document.querySelectorAll('.drag-source');
+-- MAGIC         var targets = document.querySelectorAll('.drop-target');
+-- MAGIC         var resetBtn = document.getElementById('resetMatchBtn');
+-- MAGIC         
+-- MAGIC         sources.forEach(function(src) {
+-- MAGIC             src.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedKey = this.dataset.key;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             src.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedKey = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         targets.forEach(function(tgt) {
+-- MAGIC             tgt.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff3e0';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('dragleave', function() {
+-- MAGIC                 var isMatched = false;
+-- MAGIC                 for (var key in matchedPairs) {
+-- MAGIC                     if (matchedPairs[key] === this.dataset.answer) {
+-- MAGIC                         isMatched = true;
+-- MAGIC                         break;
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC                 this.style.background = isMatched ? '#e8f5e9' : 'white';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedKey) {
+-- MAGIC                     var correctAnswer = draggedKey;
+-- MAGIC                     var targetAnswer = this.dataset.answer;
+-- MAGIC                     
+-- MAGIC                     if (correctAnswer === targetAnswer) {
+-- MAGIC                         matchedPairs[draggedKey] = targetAnswer;
+-- MAGIC                         render();
+-- MAGIC                     } else {
+-- MAGIC                         this.style.background = '#ffebee';
+-- MAGIC                         this.style.borderColor = '#f44336';
+-- MAGIC                         var self = this;
+-- MAGIC                         setTimeout(function() {
+-- MAGIC                             self.style.background = 'white';
+-- MAGIC                             self.style.borderColor = '#ff9800';
+-- MAGIC                         }, 800);
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             matchedPairs = {};
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 2: Oracle Row Count Baseline Query
+-- MAGIC
+-- MAGIC Complete the Oracle query to extract row count baselines for validation. Fill in the blanks with the correct values.
+-- MAGIC
+-- MAGIC <div id="fillBlankEx2Root"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "col1",    options: ["num_rows", "row_count", "table_rows", "count"],             correct: "num_rows" },
+-- MAGIC         { id: "col2",    options: ["last_analyzed", "last_modified", "stats_date", "analyze_date"], correct: "last_analyzed" },
+-- MAGIC         { id: "view1",   options: ["ALL_TABLES", "DBA_OBJECTS", "USER_TABLES", "V$TABLES"],    correct: "ALL_TABLES" },
+-- MAGIC         { id: "filter1", options: ["owner", "schema_name", "table_catalog", "username"],        correct: "owner" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdown(d, color) {
+-- MAGIC         var textColor = color || '#ce9178';
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: ' + textColor + '; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('fillBlankEx2Root');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: Extract Row Count Baselines from Oracle</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="padding: 12px 16px; background: #e3f2fd; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #1976d2;">';
+-- MAGIC         html += '<div style="color: #333;">Complete this Oracle query to extract row count baselines from the data dictionary for HR schema tables before cutover validation.</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;owner <span style="color: #569cd6;">AS</span> schema_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;table_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[0], '#9cdcfe') + ',&nbsp;&nbsp;<span style="color: #6a9955;">-- populated by DBMS_STATS; may be stale</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[1], '#9cdcfe') + '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span> ' + makeDropdown(dropdowns[2], '#4ec9b0') + '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">WHERE</span> ' + makeDropdown(dropdowns[3], '#ce9178') + ' = <span style="color: #ce9178;">\'HR\'</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span> num_rows <span style="color: #569cd6;">DESC</span>;';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> <code>ALL_TABLES</code> shows all tables accessible to the user, including other schemas via grants. <code>num_rows</code> is maintained by <code>DBMS_STATS</code> — run <code>ANALYZE TABLE</code> first if statistics may be stale. Filter by <code>owner</code> (not <code>schema_name</code>) to isolate the HR schema.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> Use <code>ALL_TABLES</code> for metadata visible to the current user, filter by <code>owner</code> for the HR schema, and retrieve <code>num_rows</code> (statistics) and <code>last_analyzed</code> (freshness indicator).';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkEx2Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetEx2Btn" style="padding: 12px 28px; background: #757575; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         var checkBtn = document.getElementById('checkEx2Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetEx2Btn');
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 3: Collect Aggregates for Employee Data Validation
+-- MAGIC
+-- MAGIC One of the most critical data parity checks compares aggregate metrics between source and target. Write a SQL query that collects validation metrics for the `employees` table that would be compared against the Oracle source system.
+-- MAGIC
+-- MAGIC **Your query should calculate:**
+-- MAGIC - Total row count
+-- MAGIC - Sum of `salary`
+-- MAGIC - Average `salary` (rounded to 2 decimal places)
+-- MAGIC - Minimum and maximum `salary`
+-- MAGIC - Standard deviation of `salary` (rounded to 2 decimal places)
+-- MAGIC
+-- MAGIC **Alias your columns as:** `row_count`, `sum_salary`, `avg_salary`, `min_salary`, `max_salary`, `stddev_salary`
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Validate Aggregates (SQL)
+-- Exercise 3: Write your aggregate validation query for employees
+-- Calculate: COUNT, SUM(salary), AVG(salary), MIN/MAX(salary), STDDEV(salary)
+
+SELECT
+  -- YOUR CODE HERE
+
+
+FROM employees;
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">📖 Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Collect table aggregates for validation
+-- MAGIC SELECT
+-- MAGIC   COUNT(*) AS row_count,
+-- MAGIC   ROUND(SUM(salary), 2) AS sum_salary,
+-- MAGIC   ROUND(AVG(salary), 2) AS avg_salary,
+-- MAGIC   MIN(salary) AS min_salary,
+-- MAGIC   MAX(salary) AS max_salary,
+-- MAGIC   ROUND(STDDEV(salary), 2) AS stddev_salary
+-- MAGIC FROM employees;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 4: DataFrame Data Validation with PySpark
+-- MAGIC
+-- MAGIC Beyond SQL aggregates, PySpark's `assertDataFrameEqual` function enables precise row-by-row comparison. This is especially useful for validating small reference tables or filtered subsets.
+-- MAGIC
+-- MAGIC In this exercise, you'll:
+-- MAGIC 1. Create an expected DataFrame with known values (simulating values from the Oracle validation extract)
+-- MAGIC 2. Create an actual DataFrame with the same records
+-- MAGIC 3. Use `assertDataFrameEqual` to verify the data matches
+-- MAGIC
+-- MAGIC **Scenario:** Your migration team has identified 3 senior executives whose records are critical to validate after migration. Confirm that these employee records migrated correctly.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Pyspark Test Setup (Python)
+-- MAGIC %python
+-- MAGIC # Exercise 4 Setup - Create expected DataFrame for critical executives
+-- MAGIC # This represents the "source of truth" values from your Oracle validation extract
+-- MAGIC
+-- MAGIC from pyspark.sql.types import StructType, StructField, IntegerType, StringType, DecimalType
+-- MAGIC from decimal import Decimal
+-- MAGIC
+-- MAGIC # Define the schema matching the employees table
+-- MAGIC employees_schema = StructType([
+-- MAGIC     StructField("employee_id", IntegerType(),      False),
+-- MAGIC     StructField("first_name",  StringType(),        True),
+-- MAGIC     StructField("last_name",   StringType(),        False),
+-- MAGIC     StructField("job_id",      StringType(),        False),
+-- MAGIC     StructField("salary",      DecimalType(8, 2),   True)
+-- MAGIC ])
+-- MAGIC
+-- MAGIC # Expected values - these 3 executives must match exactly after migration
+-- MAGIC expected_data = [
+-- MAGIC     (100, "Steven", "King",    "AD_PRES", Decimal("24000.00")),
+-- MAGIC     (101, "Neena",  "Kochhar", "AD_VP",   Decimal("17000.00")),
+-- MAGIC     (102, "Lex",    "De Haan", "AD_VP",   Decimal("17000.00"))
+-- MAGIC ]
+-- MAGIC expected_df = spark.createDataFrame(expected_data, employees_schema)
+-- MAGIC display(expected_df)
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Pyspark Tests (SQL)
+-- MAGIC %python
+-- MAGIC # Exercise 4: Use assertDataFrameEqual to validate the employee data
+-- MAGIC #
+-- MAGIC # Your task:
+-- MAGIC # Use assertDataFrameEqual to compare the expected and actual DataFrames
+-- MAGIC
+-- MAGIC from pyspark.sql import functions as F
+-- MAGIC from pyspark.testing.utils import assertDataFrameEqual
+-- MAGIC
+-- MAGIC
+-- MAGIC actual_df = spark.table("employees").filter(F.col("employee_id").isin([100, 101, 102])).select(
+-- MAGIC     "employee_id", "first_name", "last_name", "job_id", "salary"
+-- MAGIC )
+-- MAGIC
+-- MAGIC # TODO: safely compare the expected and actual DataFrames
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">📖 Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="python">
+-- MAGIC from pyspark.testing.utils import assertDataFrameEqual
+-- MAGIC <br/>
+-- MAGIC # DataFrame comparison
+-- MAGIC try:
+-- MAGIC     assertDataFrameEqual(actual_df, expected_df, checkRowOrder=False)
+-- MAGIC     print("✓ DataFrame equality check passed")
+-- MAGIC except Exception as e:
+-- MAGIC     print(f"✗ DataFrame mismatch:\n{e}")
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'python';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Observability & Monitoring
+-- MAGIC
+-- MAGIC In this lesson, you learned how to use Databricks system tables for monitoring job execution, query history, billing, and data lineage. You also explored Lakeflow pipeline event logs and performance tuning techniques.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 5: System Catalog Schemas
+-- MAGIC
+-- MAGIC Drag each Databricks system catalog schema to its purpose.
+-- MAGIC
+-- MAGIC <div id="systemSchemaRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var concepts = [
+-- MAGIC         ["system.lakeflow", "Job and pipeline execution history", "Jobs, job_run_timeline, pipelines"],
+-- MAGIC         ["system.compute", "Compute utilization and configuration", "Clusters, warehouses, warehouse_events"],
+-- MAGIC         ["system.billing", "Cost tracking and chargebacks", "Usage, list_prices"],
+-- MAGIC         ["system.access", "Security auditing and data lineage", "Audit, table_lineage, column_lineage"],
+-- MAGIC         ["system.query", "SQL query execution details", "History of warehouse queries"],
+-- MAGIC         ["system.storage", "Table optimization events", "Predictive optimization operations"]
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var matchedPairs = {};
+-- MAGIC     var draggedKey = null;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countMatched() {
+-- MAGIC         return Object.keys(matchedPairs).length;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('systemSchemaRoot');
+-- MAGIC         var shuffledSources = shuffleArray(concepts);
+-- MAGIC         var shuffledTargets = shuffleArray(concepts);
+-- MAGIC         
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f9f9f9; border-radius: 12px; border: 1px solid #ddd; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">🎯 Drag & Drop: Schema → Purpose</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 15px;">';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e8f5e9; color: #2e7d32;">✓ Matched: ' + countMatched() + '</span>';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e3f2fd; color: #1565c0;">○ Remaining: ' + (concepts.length - countMatched()) + '</span>';
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 40px; width: 100%;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%); color: #c62828; text-align: center; margin-bottom: 12px;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="18" height="18" style="vertical-align: middle; margin-right: 8px;"/>System Schema</div>';
+-- MAGIC         
+-- MAGIC         shuffledSources.forEach(function(src) {
+-- MAGIC             var srcKey = src[0];
+-- MAGIC             var isSourceMatched = matchedPairs[srcKey] !== undefined;
+-- MAGIC             
+-- MAGIC             var srcBg = isSourceMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var srcBorder = isSourceMatched ? '#4caf50' : '#FF3621';
+-- MAGIC             var srcCursor = isSourceMatched ? 'default' : 'grab';
+-- MAGIC             var srcOpacity = isSourceMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div draggable="' + (!isSourceMatched) + '" data-key="' + srcKey + '" class="drag-source" style="padding: 14px 20px; margin-bottom: 8px; background: ' + srcBg + '; border: 2px solid ' + srcBorder + '; border-radius: 8px; cursor: ' + srcCursor + '; font-size: 0.95em; color: #333; opacity: ' + srcOpacity + '; transition: all 0.15s ease; font-family: monospace;">' + srcKey + '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); color: #2e7d32; text-align: center; margin-bottom: 12px;">Purpose</div>';
+-- MAGIC         
+-- MAGIC         shuffledTargets.forEach(function(tgt) {
+-- MAGIC             var tgtAnswer = tgt[0];
+-- MAGIC             var tgtLabel = tgt[1];
+-- MAGIC             var isTargetMatched = false;
+-- MAGIC             
+-- MAGIC             for (var key in matchedPairs) {
+-- MAGIC                 if (matchedPairs[key] === tgtAnswer) {
+-- MAGIC                     isTargetMatched = true;
+-- MAGIC                     break;
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             var tgtBg = isTargetMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var tgtBorder = isTargetMatched ? '#4caf50' : '#4caf50';
+-- MAGIC             var tgtOpacity = isTargetMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div class="drop-target" data-answer="' + tgtAnswer + '" style="padding: 14px 20px; margin-bottom: 8px; background: ' + tgtBg + '; border: 2px dashed ' + tgtBorder + '; border-radius: 8px; font-size: 0.95em; color: #333; opacity: ' + tgtOpacity + '; transition: all 0.15s ease; min-height: 24px;">';
+-- MAGIC             if (isTargetMatched) {
+-- MAGIC                 html += '<span style="color: #2e7d32; font-weight: 600;">✓ </span>';
+-- MAGIC             }
+-- MAGIC             html += tgtLabel;
+-- MAGIC             html += '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (countMatched() === concepts.length) {
+-- MAGIC             html += '<div style="margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 2px solid #4caf50; border-radius: 12px; text-align: center;">';
+-- MAGIC             html += '<div style="font-size: 2em; margin-bottom: 8px;">🎉</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; font-weight: 600; color: #2e7d32;">All System Schemas Matched!</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 20px; padding-top: 16px; border-top: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<button id="resetSchemaBtn" style="padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sources = document.querySelectorAll('.drag-source');
+-- MAGIC         var targets = document.querySelectorAll('.drop-target');
+-- MAGIC         var resetBtn = document.getElementById('resetSchemaBtn');
+-- MAGIC         
+-- MAGIC         sources.forEach(function(src) {
+-- MAGIC             src.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedKey = this.dataset.key;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             src.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedKey = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         targets.forEach(function(tgt) {
+-- MAGIC             tgt.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#f0f7ff';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('dragleave', function() {
+-- MAGIC                 var isMatched = false;
+-- MAGIC                 for (var key in matchedPairs) {
+-- MAGIC                     if (matchedPairs[key] === this.dataset.answer) {
+-- MAGIC                         isMatched = true;
+-- MAGIC                         break;
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC                 this.style.background = isMatched ? '#e8f5e9' : 'white';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedKey) {
+-- MAGIC                     var correctAnswer = draggedKey;
+-- MAGIC                     var targetAnswer = this.dataset.answer;
+-- MAGIC                     
+-- MAGIC                     if (correctAnswer === targetAnswer) {
+-- MAGIC                         matchedPairs[draggedKey] = targetAnswer;
+-- MAGIC                         render();
+-- MAGIC                     } else {
+-- MAGIC                         this.style.background = '#ffebee';
+-- MAGIC                         this.style.borderColor = '#f44336';
+-- MAGIC                         var self = this;
+-- MAGIC                         setTimeout(function() {
+-- MAGIC                             self.style.background = 'white';
+-- MAGIC                             self.style.borderColor = '#4caf50';
+-- MAGIC                         }, 800);
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             matchedPairs = {};
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 6: Lakeflow Pipeline Monitoring - True or False?
+-- MAGIC
+-- MAGIC Answer these rapid-fire True/False questions about Lakeflow Pipeline monitoring.
+-- MAGIC
+-- MAGIC <div id="trueFalseRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var questions = [
+-- MAGIC         { statement: "Lakeflow event logs capture table-level metrics like rows written and bytes processed.", answer: true, explanation: "Lakeflow event logs include detailed metrics for each table update, including rows written, bytes processed, and execution time." },
+-- MAGIC         { statement: "You must manually enable system tables - they are disabled by default.", answer: false, explanation: "System tables are enabled by default in Unity Catalog and available in the system catalog." },
+-- MAGIC         { statement: "The system.access.table_lineage table tracks upstream and downstream table dependencies.", answer: true, explanation: "The table_lineage view captures source and target table relationships across your data pipelines." },
+-- MAGIC         { statement: "Streaming pipelines use checkpoints to track processing progress.", answer: true, explanation: "Checkpoints maintain processing state, enabling exactly-once semantics and recovery from failures." },
+-- MAGIC         { statement: "System tables only contain data from the current workspace, not other workspaces in the account.", answer: false, explanation: "System tables contain data from all workspaces in your account within the same cloud region." },
+-- MAGIC         { statement: "Lakeflow SDP event logs can be exported to Delta tables.", answer: true, explanation: "Event logs are stored as hidden tables, but they can also be exported into regular Delta tables." }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var currentIndex = 0;
+-- MAGIC     var score = 0;
+-- MAGIC     var answered = [];
+-- MAGIC     var showingFeedback = false;
+-- MAGIC     var lastAnswer = null;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         currentIndex = 0;
+-- MAGIC         score = 0;
+-- MAGIC         answered = [];
+-- MAGIC         showingFeedback = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('trueFalseRoot');
+-- MAGIC         var html = '';
+-- MAGIC         var isComplete = currentIndex >= questions.length;
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         // Header
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div>';
+-- MAGIC         html += '<div style="font-size: 1.4em; font-weight: 600; color: #333;">⚡ True or False: Rapid Fire</div>';
+-- MAGIC         html += '<div style="font-size: 0.95em; color: #666; margin-top: 4px;">Lakeflow Pipeline Monitoring</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 12px; align-items: center;">';
+-- MAGIC         html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: #e8f5e9; color: #2e7d32;">✓ ' + score + '</span>';
+-- MAGIC         html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">' + (currentIndex) + '/' + questions.length + '</span>';
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         // Progress bar
+-- MAGIC         html += '<div style="height: 8px; background: #e0e0e0; border-radius: 4px; margin-bottom: 24px; overflow: hidden;">';
+-- MAGIC         html += '<div style="height: 100%; width: ' + (currentIndex / questions.length * 100) + '%; background: linear-gradient(90deg, #4caf50, #8bc34a); transition: width 0.3s ease;"></div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (isComplete) {
+-- MAGIC             // Results screen
+-- MAGIC             var percentage = Math.round(score / questions.length * 100);
+-- MAGIC             var grade = percentage >= 80 ? '🏆 Excellent!' : percentage >= 60 ? '👍 Good job!' : '📚 Keep studying!';
+-- MAGIC             
+-- MAGIC             html += '<div style="text-align: center; padding: 40px 20px;">';
+-- MAGIC             html += '<div style="font-size: 3em; margin-bottom: 16px;">' + (percentage >= 80 ? '🎉' : percentage >= 60 ? '👏' : '💪') + '</div>';
+-- MAGIC             html += '<div style="font-size: 1.8em; font-weight: 700; color: #333; margin-bottom: 8px;">' + grade + '</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; color: #666;">You scored ' + score + ' out of ' + questions.length + ' (' + percentage + '%)</div>';
+-- MAGIC             html += '<button id="restartBtn" style="margin-top: 24px; padding: 14px 32px; background: #1976d2; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1.1em; font-weight: 600;">↻ Try Again</button>';
+-- MAGIC             html += '</div>';
+-- MAGIC         } else {
+-- MAGIC             // Question card
+-- MAGIC             var q = questions[currentIndex];
+-- MAGIC             
+-- MAGIC             html += '<div style="background: #fff; border: 2px solid #e0e0e0; border-radius: 12px; padding: 32px; margin-bottom: 20px;">';
+-- MAGIC             html += '<div style="font-size: 1.2em; color: #333; line-height: 1.6; text-align: center; min-height: 60px;">"' + q.statement + '"</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             
+-- MAGIC             if (showingFeedback) {
+-- MAGIC                 // Feedback
+-- MAGIC                 var isCorrect = lastAnswer === q.answer;
+-- MAGIC                 var feedbackBg = isCorrect ? '#e8f5e9' : '#ffebee';
+-- MAGIC                 var feedbackBorder = isCorrect ? '#4caf50' : '#f44336';
+-- MAGIC                 var feedbackIcon = isCorrect ? '✓ Correct!' : '✗ Incorrect';
+-- MAGIC                 
+-- MAGIC                 html += '<div style="background: ' + feedbackBg + '; border: 2px solid ' + feedbackBorder + '; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">';
+-- MAGIC                 html += '<div style="font-weight: 600; color: ' + feedbackBorder + '; margin-bottom: 8px;">' + feedbackIcon + '</div>';
+-- MAGIC                 html += '<div style="color: #333; font-size: 0.95em;">' + q.explanation + '</div>';
+-- MAGIC                 html += '</div>';
+-- MAGIC                 
+-- MAGIC                 html += '<div style="text-align: center;">';
+-- MAGIC                 html += '<button id="nextBtn" style="padding: 14px 40px; background: #1976d2; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1.1em; font-weight: 600;">Next Question →</button>';
+-- MAGIC                 html += '</div>';
+-- MAGIC             } else {
+-- MAGIC                 // Answer buttons
+-- MAGIC                 html += '<div style="display: flex; gap: 20px; justify-content: center;">';
+-- MAGIC                 html += '<button class="answer-btn" data-answer="true" style="flex: 1; max-width: 200px; padding: 20px 32px; background: #e8f5e9; border: 3px solid #4caf50; border-radius: 12px; cursor: pointer; font-size: 1.2em; font-weight: 700; color: #2e7d32; transition: all 0.15s ease;">✓ TRUE</button>';
+-- MAGIC                 html += '<button class="answer-btn" data-answer="false" style="flex: 1; max-width: 200px; padding: 20px 32px; background: #ffebee; border: 3px solid #f44336; border-radius: 12px; cursor: pointer; font-size: 1.2em; font-weight: 700; color: #c62828; transition: all 0.15s ease;">✗ FALSE</button>';
+-- MAGIC                 html += '</div>';
+-- MAGIC             }
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var answerBtns = document.querySelectorAll('.answer-btn');
+-- MAGIC         var nextBtn = document.getElementById('nextBtn');
+-- MAGIC         var restartBtn = document.getElementById('restartBtn');
+-- MAGIC         
+-- MAGIC         answerBtns.forEach(function(btn) {
+-- MAGIC             btn.addEventListener('click', function() {
+-- MAGIC                 var answer = this.dataset.answer === 'true';
+-- MAGIC                 lastAnswer = answer;
+-- MAGIC                 var q = questions[currentIndex];
+-- MAGIC                 if (answer === q.answer) {
+-- MAGIC                     score++;
+-- MAGIC                 }
+-- MAGIC                 answered.push(answer);
+-- MAGIC                 showingFeedback = true;
+-- MAGIC                 render();
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             btn.addEventListener('mouseenter', function() {
+-- MAGIC                 this.style.transform = 'scale(1.05)';
+-- MAGIC                 this.style.boxShadow = '0 6px 20px rgba(0,0,0,0.15)';
+-- MAGIC             });
+-- MAGIC             btn.addEventListener('mouseleave', function() {
+-- MAGIC                 this.style.transform = 'scale(1)';
+-- MAGIC                 this.style.boxShadow = 'none';
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         if (nextBtn) {
+-- MAGIC             nextBtn.addEventListener('click', function() {
+-- MAGIC                 currentIndex++;
+-- MAGIC                 showingFeedback = false;
+-- MAGIC                 render();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (restartBtn) {
+-- MAGIC             restartBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 7: Table Lineage Query
+-- MAGIC
+-- MAGIC Complete the query to find table lineage for your migrated tables using the system catalog.
+-- MAGIC
+-- MAGIC <div id="fillBlankEx7Root"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "schema1", options: ["access", "lakeflow", "billing", "query"], correct: "access" },
+-- MAGIC         { id: "table1", options: ["table_lineage", "column_lineage", "audit", "history"], correct: "table_lineage" },
+-- MAGIC         { id: "col1", options: ["target_table_full_name", "row_count", "schema_name", "source_table"], correct: "target_table_full_name" },
+-- MAGIC         { id: "func1", options: ["current_date()", "now()", "today()", "getdate()"], correct: "current_date()" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdown(d, color) {
+-- MAGIC         var textColor = color || '#ce9178';
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: ' + textColor + '; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('fillBlankEx7Root');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: Table Lineage</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="padding: 12px 16px; background: #e3f2fd; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #1976d2;">';
+-- MAGIC         html += '<div style="color: #333;">Complete this query to find upstream and downstream dependencies for tables in your catalog.</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;source_table_full_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;target_table_full_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;entity_type,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;entity_id,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;event_time,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;event_date<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span> system.' + makeDropdown(dropdowns[0], '#4ec9b0') + '.' + makeDropdown(dropdowns[1], '#4ec9b0') + '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">WHERE</span> (<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;source_table_full_name <span style="color: #569cd6;">LIKE</span> <span style="color: #ce9178;">\'%hr_%\'</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #569cd6;">OR</span> ' + makeDropdown(dropdowns[2], '#9cdcfe') + ' <span style="color: #569cd6;">LIKE</span> <span style="color: #ce9178;">\'%hr_%\'</span><br/>';
+-- MAGIC         html += ')<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">AND</span> event_date >= ' + makeDropdown(dropdowns[3], '#dcdcaa') + ' - <span style="color: #569cd6;">INTERVAL</span> <span style="color: #b5cea8;">7</span> <span style="color: #569cd6;">DAYS</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span> event_time <span style="color: #569cd6;">DESC</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">LIMIT</span> <span style="color: #b5cea8;">50</span>;';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> The <code>system.access.table_lineage</code> table tracks data flow between tables. Query both <code>source_table_full_name</code> and <code>target_table_full_name</code> to find upstream and downstream dependencies.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> Use <code>system.access.table_lineage</code> for lineage data. Check both source and target columns, and use <code>current_date()</code> for date filtering in Databricks SQL.';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkEx7Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetEx7Btn" style="padding: 12px 28px; background: #757575; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         var checkBtn = document.getElementById('checkEx7Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetEx7Btn');
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Cutover Execution
+-- MAGIC
+-- MAGIC In this lesson, you learned about different cutover strategies, how to plan freeze windows and rollback procedures, run delta catch-up, and switch consumers to Databricks endpoints.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 8: Cutover Strategy Risk Assessment
+-- MAGIC
+-- MAGIC Drag each cutover strategy into the appropriate risk bucket.
+-- MAGIC
+-- MAGIC <div id="riskBucketRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var items = [
+-- MAGIC         { id: "canary", label: "Canary (small % of traffic)", correct: "verylow" },
+-- MAGIC         { id: "ab_testing", label: "A/B Testing (split traffic)", correct: "low" },
+-- MAGIC         { id: "pilot", label: "Pilot Group (specific teams first)", correct: "low" },
+-- MAGIC         { id: "blue_green", label: "Blue-Green (parallel systems)", correct: "low" },
+-- MAGIC         { id: "phased", label: "Phased/Incremental (waves)", correct: "low" },
+-- MAGIC         { id: "big_bang", label: "Big Bang (all at once)", correct: "high" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var buckets = {
+-- MAGIC         verylow: { label: "🟢 Very Low Risk", color: "#4caf50", items: [] },
+-- MAGIC         low: { label: "🟡 Low Risk", color: "#ff9800", items: [] },
+-- MAGIC         high: { label: "🔴 High Risk", color: "#f44336", items: [] }
+-- MAGIC     };
+-- MAGIC     
+-- MAGIC     var unsorted = [];
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         unsorted = shuffleArray(items.slice());
+-- MAGIC         buckets.verylow.items = [];
+-- MAGIC         buckets.low.items = [];
+-- MAGIC         buckets.high.items = [];
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function getItemById(id) {
+-- MAGIC         for (var i = 0; i < items.length; i++) {
+-- MAGIC             if (items[i].id === id) return items[i];
+-- MAGIC         }
+-- MAGIC         return null;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             buckets[key].items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 if (item && item.correct === key) correct++;
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('riskBucketRoot');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f9f9f9; border-radius: 12px; border: 1px solid #ddd; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">🎯 Drag Strategies to Risk Buckets</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         // Unsorted items
+-- MAGIC         html += '<div style="margin-bottom: 20px; padding: 16px; background: #fff; border: 2px dashed #ccc; border-radius: 8px; min-height: 60px;">';
+-- MAGIC         html += '<div style="font-weight: 600; color: #666; margin-bottom: 12px;">Strategies to classify:</div>';
+-- MAGIC         html += '<div style="display: flex; flex-wrap: wrap; gap: 10px;">';
+-- MAGIC         unsorted.forEach(function(item) {
+-- MAGIC             html += '<div draggable="true" data-id="' + item.id + '" class="strategy-item" style="padding: 10px 16px; background: white; border: 2px solid #1976d2; border-radius: 6px; cursor: grab; font-size: 0.9em;">' + item.label + '</div>';
+-- MAGIC         });
+-- MAGIC         if (unsorted.length === 0) {
+-- MAGIC             html += '<div style="color: #999; font-style: italic;">All strategies classified!</div>';
+-- MAGIC         }
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         // Buckets
+-- MAGIC         html += '<div style="display: flex; gap: 16px;">';
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             var bucket = buckets[key];
+-- MAGIC             html += '<div class="risk-bucket" data-bucket="' + key + '" style="flex: 1; padding: 16px; background: #fff; border: 2px dashed ' + bucket.color + '; border-radius: 8px; min-height: 120px;">';
+-- MAGIC             html += '<div style="font-weight: 600; color: ' + bucket.color + '; margin-bottom: 12px; text-align: center;">' + bucket.label + '</div>';
+-- MAGIC             bucket.items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 var isCorrect = item.correct === key;
+-- MAGIC                 var itemBg = showResults ? (isCorrect ? '#e8f5e9' : '#ffebee') : 'white';
+-- MAGIC                 var itemBorder = showResults ? (isCorrect ? '#4caf50' : '#f44336') : bucket.color;
+-- MAGIC                 html += '<div draggable="true" data-id="' + id + '" class="strategy-item" style="padding: 8px 12px; margin-bottom: 8px; background: ' + itemBg + '; border: 2px solid ' + itemBorder + '; border-radius: 6px; cursor: grab; font-size: 0.85em;">';
+-- MAGIC                 if (showResults) {
+-- MAGIC                     html += '<span style="margin-right: 6px;">' + (isCorrect ? '✓' : '✗') + '</span>';
+-- MAGIC                 }
+-- MAGIC                 html += item.label + '</div>';
+-- MAGIC             });
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var correct = countCorrect();
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 16px; background: ' + (correct === items.length ? '#e8f5e9' : '#fff3e0') + '; border: 2px solid ' + (correct === items.length ? '#4caf50' : '#ff9800') + '; border-radius: 8px; text-align: center;">';
+-- MAGIC             html += '<div style="font-weight: 600; color: ' + (correct === items.length ? '#2e7d32' : '#e65100') + ';">' + (correct === items.length ? '🎉 Perfect!' : 'Score: ' + correct + '/' + items.length) + '</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 16px; display: flex; gap: 10px;">';
+-- MAGIC         html += '<button id="checkRiskBtn" style="padding: 10px 24px; background: ' + (unsorted.length > 0 ? '#ccc' : '#4caf50') + '; color: white; border: none; border-radius: 6px; cursor: ' + (unsorted.length > 0 ? 'not-allowed' : 'pointer') + '; font-weight: 600;"' + (unsorted.length > 0 ? ' disabled' : '') + '>Check Answers</button>';
+-- MAGIC         html += '<button id="resetRiskBtn" style="padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var strategyItems = document.querySelectorAll('.strategy-item');
+-- MAGIC         var bucketEls = document.querySelectorAll('.risk-bucket');
+-- MAGIC         var checkBtn = document.getElementById('checkRiskBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetRiskBtn');
+-- MAGIC         var draggedId = null;
+-- MAGIC         
+-- MAGIC         strategyItems.forEach(function(item) {
+-- MAGIC             item.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedId = this.dataset.id;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedId = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         bucketEls.forEach(function(bucket) {
+-- MAGIC             bucket.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#f0f7ff';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('dragleave', function() {
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedId) {
+-- MAGIC                     var targetBucket = this.dataset.bucket;
+-- MAGIC                     unsorted = unsorted.filter(function(item) { return item.id !== draggedId; });
+-- MAGIC                     for (var key in buckets) {
+-- MAGIC                         buckets[key].items = buckets[key].items.filter(function(id) { return id !== draggedId; });
+-- MAGIC                     }
+-- MAGIC                     buckets[targetBucket].items.push(draggedId);
+-- MAGIC                     showResults = false;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (unsorted.length === 0) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 9: Cutover Phase Sequencing
+-- MAGIC
+-- MAGIC Drag the cutover phases into the correct execution order.
+-- MAGIC
+-- MAGIC <div id="sequenceRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var steps = [
+-- MAGIC         { id: "prefreeze", label: "Pre-Freeze: Notify stakeholders, disable scheduled jobs, pause CDC", order: 1 },
+-- MAGIC         { id: "deltacatch", label: "Delta Catch-up: Run final incremental sync, process remaining CDC events", order: 2 },
+-- MAGIC         { id: "reconcile", label: "Reconciliation: Run Lakebridge reconcile, validate aggregations", order: 3 },
+-- MAGIC         { id: "gonogo", label: "Go/No-Go Gate: Review validation results, confirm rollback readiness", order: 4 },
+-- MAGIC         { id: "cutover", label: "Cutover: Switch connection strings, update DNS, redirect consumers", order: 5 },
+-- MAGIC         { id: "smoketest", label: "Smoke Test: Run critical queries, verify dashboards, check alerting", order: 6 }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var currentOrder = [];
+-- MAGIC     var showResult = false;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         currentOrder = shuffleArray(steps.map(function(s) { return s.id; }));
+-- MAGIC         showResult = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function getStepById(id) {
+-- MAGIC         for (var i = 0; i < steps.length; i++) {
+-- MAGIC             if (steps[i].id === id) return steps[i];
+-- MAGIC         }
+-- MAGIC         return null;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function isCorrectOrder() {
+-- MAGIC         for (var i = 0; i < currentOrder.length; i++) {
+-- MAGIC             var step = getStepById(currentOrder[i]);
+-- MAGIC             if (step.order !== i + 1) return false;
+-- MAGIC         }
+-- MAGIC         return true;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('sequenceRoot');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">📋 Drag to Sequence Cutover Phases</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px;">';
+-- MAGIC         
+-- MAGIC         currentOrder.forEach(function(id, idx) {
+-- MAGIC             var step = getStepById(id);
+-- MAGIC             var isCorrect = step.order === idx + 1;
+-- MAGIC             var bgColor = '#fff';
+-- MAGIC             var borderColor = '#1976d2';
+-- MAGIC             
+-- MAGIC             if (showResult) {
+-- MAGIC                 bgColor = isCorrect ? '#e8f5e9' : '#ffebee';
+-- MAGIC                 borderColor = isCorrect ? '#4caf50' : '#f44336';
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             html += '<div draggable="true" data-id="' + id + '" class="sequence-item" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 8px; background: ' + bgColor + '; border: 2px solid ' + borderColor + '; border-radius: 8px; cursor: grab;">';
+-- MAGIC             html += '<span style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: ' + borderColor + '; color: white; border-radius: 50%; font-weight: 600; font-size: 0.9em;">' + (idx + 1) + '</span>';
+-- MAGIC             html += '<span style="flex: 1; font-size: 0.95em;">' + step.label + '</span>';
+-- MAGIC             if (showResult) {
+-- MAGIC                 html += '<span style="font-size: 1.2em;">' + (isCorrect ? '✓' : '✗') + '</span>';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResult) {
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 16px; background: ' + (isCorrectOrder() ? '#e8f5e9' : '#fff3e0') + '; border: 2px solid ' + (isCorrectOrder() ? '#4caf50' : '#ff9800') + '; border-radius: 8px; text-align: center;">';
+-- MAGIC             html += '<div style="font-weight: 600; color: ' + (isCorrectOrder() ? '#2e7d32' : '#e65100') + ';">' + (isCorrectOrder() ? '🎉 Correct Order!' : 'Not quite right - keep trying!') + '</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 16px; display: flex; gap: 10px;">';
+-- MAGIC         html += '<button id="checkSeqBtn" style="padding: 10px 24px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Check Order</button>';
+-- MAGIC         html += '<button id="resetSeqBtn" style="padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var seqItems = document.querySelectorAll('.sequence-item');
+-- MAGIC         var checkBtn = document.getElementById('checkSeqBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetSeqBtn');
+-- MAGIC         var draggedItem = null;
+-- MAGIC         
+-- MAGIC         seqItems.forEach(function(item) {
+-- MAGIC             item.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedItem = this;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedItem = null;
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderTop = '3px solid #1976d2';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragleave', function() {
+-- MAGIC                 this.style.borderTop = '';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderTop = '';
+-- MAGIC                 
+-- MAGIC                 if (draggedItem && this !== draggedItem) {
+-- MAGIC                     var draggedId = draggedItem.dataset.id;
+-- MAGIC                     var targetId = this.dataset.id;
+-- MAGIC                     
+-- MAGIC                     var draggedIdx = currentOrder.indexOf(draggedId);
+-- MAGIC                     var targetIdx = currentOrder.indexOf(targetId);
+-- MAGIC                     
+-- MAGIC                     currentOrder.splice(draggedIdx, 1);
+-- MAGIC                     currentOrder.splice(targetIdx, 0, draggedId);
+-- MAGIC                     
+-- MAGIC                     showResult = false;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         checkBtn.addEventListener('click', function() {
+-- MAGIC             showResult = true;
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             init();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 10: Suspend Oracle Tasks
+-- MAGIC
+-- MAGIC Complete the Oracle command to suspend the scheduled pipeline tasks for the HR schema before cutover.
+-- MAGIC
+-- MAGIC <div id="fillBlankEx11Root"></div>
+-- MAGIC
+-- MAGIC <script type="text/javascript">
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "cmd1", options: ["DBMS_SCHEDULER", "DBMS_SQL", "DBMS_JOB", "DBMS_METADATA"], correct: "DBMS_SCHEDULER" },
+-- MAGIC         { id: "action1", options: ["DISABLE", "SUSPEND", "PAUSE", "STOP"], correct: "DISABLE" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdown(d, color) {
+-- MAGIC         var textColor = color || '#ce9178';
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: ' + textColor + '; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('fillBlankEx11Root');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: Suspend Scheduled Task</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="padding: 12px 16px; background: #e3f2fd; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #1976d2;">';
+-- MAGIC         html += '<div style="color: #333;">Complete this Oracle command to suspend the nightly data sync task for the HR schema in preparation for cutover.</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         
+-- MAGIC         html += '<span style="color: #6a9955;">-- Suspend scheduled tasks before cutover freeze</span><br/><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">EXEC </span>' + makeDropdown(dropdowns[0], '#4ec9b0') + '<span style="color: #d4d4d4;">.</span>' + makeDropdown(dropdowns[1], '#dcdcaa') + '<span style="color: #d4d4d4;">(\'</span><span style="color: #ce9178;">HR.DATA_SYNC_JOB</span><span style="color: #d4d4d4;">\');</span>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> Use <code>DBMS_SCHEDULER.DISABLE</code> to pause scheduled jobs. This prevents them from running during the cutover window while preserving their configuration for potential rollback.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> The correct Oracle syntax is <code>EXEC DBMS_SCHEDULER.DISABLE(\'job_name\');</code> to pause a scheduled job.';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkEx11Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetEx11Btn" style="padding: 12px 28px; background: #757575; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         var checkBtn = document.getElementById('checkEx11Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetEx11Btn');
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 🎉 Lab Complete!
+-- MAGIC
+-- MAGIC You've completed the Activation Phase lab. You should now be able to:
+-- MAGIC
+-- MAGIC ✅ Identify data parity check types for migration validation  
+-- MAGIC ✅ Complete Oracle `ALL_TABLES` queries to extract row count baselines  
+-- MAGIC ✅ Collect table aggregates for data validation in Databricks  
+-- MAGIC ✅ Use `assertDataFrameEqual` for programmatic DataFrame comparison  
+-- MAGIC ✅ Identify Databricks system catalog schemas and their purposes  
+-- MAGIC ✅ Query table lineage using `system.access.table_lineage`   
+-- MAGIC ✅ Classify cutover strategies by risk level  
+-- MAGIC ✅ Sequence cutover phases correctly  
+-- MAGIC ✅ Suspend Oracle tasks before cutover freeze  
+-- MAGIC
+-- MAGIC **Next Steps:** Continue to the **Enablement** phase to learn about cost optimization, consumer integration, and platform enablement.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

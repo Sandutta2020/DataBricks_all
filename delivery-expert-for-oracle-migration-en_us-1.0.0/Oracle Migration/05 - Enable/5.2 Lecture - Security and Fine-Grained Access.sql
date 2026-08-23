@@ -1,0 +1,958 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">05 - Enable</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Security and Fine-Grained Access
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC With data migrated and validated, this lesson focuses on implementing production-grade security controls. You will apply row-level and column-level security using Unity Catalog, implement attribute-based access control (ABAC) patterns, create dynamic views for secure data sharing, and document your grants and inheritance model.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Apply row-level security using row filters in Unity Catalog
+-- MAGIC - Implement column masking to protect sensitive data
+-- MAGIC - Design attribute-based access control (ABAC) policies for centralized management
+-- MAGIC - Create dynamic views for read-only secure joins
+-- MAGIC - Extract and document Oracle grants for conversion to Unity Catalog
+-- MAGIC - Query system tables to audit and document permission inheritance
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 1. Security Model Comparison
+-- MAGIC
+-- MAGIC Oracle and Databricks Unity Catalog both provide fine-grained access control (FGAC), but through very different mechanisms. Oracle's security model is built around the database engine with VPD, Label Security, and the Audit Vault; Unity Catalog provides a unified, cloud-native governance layer across all Databricks assets.
+-- MAGIC
+-- MAGIC | Security Feature | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Unity Catalog</span> |
+-- MAGIC |------------------|-----------|---------------|
+-- MAGIC | Row-level security | [Virtual Private Database (VPD)](https://docs.oracle.com/en/database/oracle/oracle-database/19/dbseg/using-oracle-virtual-private-database-to-control-data-access.html) / [Oracle Label Security (OLS)](https://docs.oracle.com/en/database/oracle/oracle-database/19/olsag/introduction-to-oracle-label-security.html)<sup>*</sup> | [Row Filters](https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/) |
+-- MAGIC | Column-level security | Object-level grants (`GRANT SELECT (col)`) / [Oracle Data Masking & Subsetting](https://docs.oracle.com/en/database/oracle/oracle-database/19/ratug/index.html)<sup>†</sup> | [Column Masks](https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/) |
+-- MAGIC | Secure data sharing | [Views](https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/partitions-views-and-other-schema-objects.html#GUID-5B02A46C-8E7F-4C46-9A2A-4EF7E48D3A2E) / [Oracle Database Vault](https://docs.oracle.com/en/database/oracle/oracle-database/19/dvadm/index.html)<sup>*</sup> | [Dynamic Views](https://docs.databricks.com/aws/en/views/dynamic) |
+-- MAGIC | Access control model | [RBAC](https://docs.oracle.com/en/database/oracle/oracle-database/19/dbseg/configuring-privilege-and-role-authorization.html): system & object privileges, roles | [Privileges + ownership](https://docs.databricks.com/aws/en/data-governance/unity-catalog/access-control), [ABAC](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/) |
+-- MAGIC | Permission assignment | ANSI SQL-92 DCL [`GRANT ... ON ... TO`](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/GRANT.html) | ANSI SQL-92 DCL [__`GRANT ... ON ... TO`__](https://docs.databricks.com/aws/en/sql/language-manual/security-grant) |
+-- MAGIC | Permission auditing | [`DBA_TAB_PRIVS`](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_TAB_PRIVS.html), [`DBA_SYS_PRIVS`](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_SYS_PRIVS.html), [`DBA_ROLE_PRIVS`](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_ROLE_PRIVS.html), [Oracle Audit Vault](https://docs.oracle.com/en/database/oracle/audit-vault-database-firewall/) | [__`information_schema`__](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-information-schema),<br/>[__`SHOW GRANTS`__](https://docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/#show-grant-and-revoke-privileges) (`table_privileges`, `catalog_privileges`, etc) |
+-- MAGIC | Context functions | [`USER`](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/USER.html), [`SYS_CONTEXT('USERENV','SESSION_USER')`](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/SYS_CONTEXT.html) | `current_user()`, `is_member()`, `is_account_group_member()` |
+-- MAGIC
+-- MAGIC <sup>*</sup> <i>Oracle Enterprise Edition feature only</i><br/>
+-- MAGIC <sup>†</sup> <i>Requires Oracle Enterprise Manager Lifecycle Management Pack</i>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 2. Unity Catalog Security Architecture
+-- MAGIC
+-- MAGIC Unity Catalog enforces access control through multiple complementary layers. Each layer evaluates independently, and **all applicable layers must permit access** for a request to succeed.
+-- MAGIC
+-- MAGIC <br/>
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart TB
+-- MAGIC     subgraph Principal["Principal"]
+-- MAGIC         direction TB
+-- MAGIC         U["👤 User"]
+-- MAGIC         G["👥 Group"]
+-- MAGIC         SP["🤖 Service Principal"]
+-- MAGIC     end
+-- MAGIC     subgraph Layer1["Layer 1: Workspace Bindings"]
+-- MAGIC         WB["Catalog ↔ Workspace<br/>binding check"]
+-- MAGIC     end
+-- MAGIC     subgraph Layer2["Layer 2: Privileges & Ownership"]
+-- MAGIC         direction TB
+-- MAGIC         OWN["Object Ownership"]
+-- MAGIC         PRV["GRANT / REVOKE<br/>(DCL)"]
+-- MAGIC         ADM["Admin Roles<br/>(Account, Metastore, Workspace)"]
+-- MAGIC     end
+-- MAGIC     subgraph Layer3["Layer 3: ABAC Policies"]
+-- MAGIC         direction TB
+-- MAGIC         TAG["Governed Tags"]
+-- MAGIC         POL["Tag-driven Policies<br/>(row filters, column masks)"]
+-- MAGIC     end
+-- MAGIC     subgraph Layer4["Layer 4: Table-Level Controls"]
+-- MAGIC         direction TB
+-- MAGIC         RF["Row Filters"]
+-- MAGIC         CM["Column Masks"]
+-- MAGIC         DV["Dynamic Views"]
+-- MAGIC     end
+-- MAGIC     subgraph Data["Secured Data"]
+-- MAGIC         DT[("Delta Tables<br/>Volumes, Models")]
+-- MAGIC     end
+-- MAGIC     U --> WB
+-- MAGIC     G --> WB
+-- MAGIC     SP --> WB
+-- MAGIC     WB -->|"Workspace allowed?"| PRV
+-- MAGIC     OWN --> PRV
+-- MAGIC     ADM --> PRV
+-- MAGIC     PRV -->|"Privileges granted?"| POL
+-- MAGIC     TAG --> POL
+-- MAGIC     POL -->|"Policy permits?"| RF
+-- MAGIC     RF --> CM
+-- MAGIC     CM --> DV
+-- MAGIC     DV -->|"Filtered & masked"| DT
+-- MAGIC     style Principal fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+-- MAGIC     style Layer1 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+-- MAGIC     style Layer2 fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+-- MAGIC     style Layer3 fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px
+-- MAGIC     style Layer4 fill:#fce4ec,stroke:#FF3621,stroke-width:2px
+-- MAGIC     style Data fill:#eceff1,stroke:#607d8b,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <script type="module">
+-- MAGIC import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+-- MAGIC mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 3. Extracting Oracle Security Policies
+-- MAGIC
+-- MAGIC Before implementing security in Unity Catalog, extract your existing Oracle security definitions for conversion. Oracle uses VPD (Virtual Private Database) policies for row-level security and object/column-level grants for column security.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Extract VPD (row-level security) policies (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Extract all VPD policy definitions across schemas
+-- MAGIC SELECT
+-- MAGIC     object_owner AS schema_name,
+-- MAGIC     object_name AS table_name,
+-- MAGIC     policy_name,
+-- MAGIC     pf_owner AS function_owner,
+-- MAGIC     package AS function_package,
+-- MAGIC     function AS policy_function,
+-- MAGIC     policy_type,
+-- MAGIC     enable AS is_enabled,
+-- MAGIC     static_policy,
+-- MAGIC     sec_relevant_cols,
+-- MAGIC     sec_relevant_cols_opt
+-- MAGIC FROM dba_policies
+-- MAGIC ORDER BY schema_name, table_name, policy_name;
+-- MAGIC
+-- MAGIC -- Find all VPD policy groups
+-- MAGIC SELECT
+-- MAGIC     object_owner,
+-- MAGIC     object_name,
+-- MAGIC     policy_group,
+-- MAGIC     policy_name,
+-- MAGIC     pf_owner,
+-- MAGIC     function
+-- MAGIC FROM dba_policy_groups
+-- MAGIC ORDER BY object_owner, object_name, policy_group;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Extract column-level grants and restrictions (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Extract column-level SELECT grants (Oracle's native column security)
+-- MAGIC SELECT
+-- MAGIC     grantee,
+-- MAGIC     owner AS schema_name,
+-- MAGIC     table_name,
+-- MAGIC     column_name,
+-- MAGIC     privilege,
+-- MAGIC     grantable
+-- MAGIC FROM dba_col_privs
+-- MAGIC WHERE privilege = 'SELECT'
+-- MAGIC   AND owner NOT IN ('SYS','SYSTEM','XDB','MDSYS','ORDSYS')
+-- MAGIC ORDER BY owner, table_name, column_name, grantee;
+-- MAGIC
+-- MAGIC -- Find tables with restricted column access via views (common pattern)
+-- MAGIC SELECT
+-- MAGIC     v.owner AS view_owner,
+-- MAGIC     v.view_name,
+-- MAGIC     v.text_length,
+-- MAGIC     t.table_name AS base_table,
+-- MAGIC     t.owner AS base_owner
+-- MAGIC FROM dba_views v
+-- MAGIC JOIN dba_dependencies d ON d.owner = v.owner AND d.name = v.view_name
+-- MAGIC JOIN dba_tables t ON t.owner = d.referenced_owner AND t.table_name = d.referenced_name
+-- MAGIC WHERE v.owner NOT IN ('SYS','SYSTEM','XDB','MDSYS')
+-- MAGIC   AND d.type = 'VIEW'
+-- MAGIC   AND d.referenced_type = 'TABLE'
+-- MAGIC ORDER BY v.owner, v.view_name;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Extract Oracle Label Security (OLS) configuration (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- List OLS-protected tables (requires Oracle Label Security option)
+-- MAGIC SELECT
+-- MAGIC     schema_name,
+-- MAGIC     table_name,
+-- MAGIC     label_column,
+-- MAGIC     policy_name,
+-- MAGIC     hide,
+-- MAGIC     read_control,
+-- MAGIC     write_control,
+-- MAGIC     check_control
+-- MAGIC FROM dba_sa_table_policies
+-- MAGIC ORDER BY schema_name, table_name;
+-- MAGIC
+-- MAGIC -- List OLS user labels and authorizations
+-- MAGIC SELECT
+-- MAGIC     policy_name,
+-- MAGIC     user_name,
+-- MAGIC     max_read_label,
+-- MAGIC     max_write_label,
+-- MAGIC     min_write_label,
+-- MAGIC     default_read_label,
+-- MAGIC     default_write_label
+-- MAGIC FROM dba_sa_user_labels
+-- MAGIC ORDER BY policy_name, user_name;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 4. Row-Level Security with Row Filters
+-- MAGIC
+-- MAGIC Row filters in Unity Catalog function similarly to Oracle Row Access Policies. They inject a `WHERE` clause that restricts which rows a user can see based on their identity or group membership.
+-- MAGIC
+-- MAGIC In Databricks, they are created as SQL UDFs that return a boolean value that determines if the row is shown. The UDF can include calls to `is_account_group_member('group')` to determine whether the principal running the query belongs to a specific group. The row filter can either be applied directly to a table with  `ALTER TABLE ... SET ROW FILTER`, or it can be attached through an ABAC policy.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Row Filter Performance</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Row filters are evaluated at query time. For optimal performance:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <li>Use simple expressions - avoid mapping tables and subqueries</li>
+-- MAGIC                 <li>Prefer <code>is_account_group_member()</code> over complex joins</li>
+-- MAGIC                 <li>Ensure the filter column is part of your Liquid Clustering key</li>
+-- MAGIC                 <li>Use deterministic functions that cannot throw errors</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 5. Column-Level Security with Column Masks
+-- MAGIC
+-- MAGIC Column masks transform sensitive data at query time. Unlike row filters that exclude rows, masks return modified values while preserving row visibility.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Common Masking Patterns
+-- MAGIC
+-- MAGIC | Pattern | Use Case | Built-in Function |
+-- MAGIC |---------|----------|-------------------|
+-- MAGIC | **Character substitution** | Names, addresses | `mask(val)` -> `XxxxXxxxx` |
+-- MAGIC | **Partial reveal** | Email, phone | `mask(val, NULL, NULL, NULL, NULL)` with `RIGHT()` |
+-- MAGIC | **Hash/tokenize** | PII for analytics | `sha2(val, 256)` |
+-- MAGIC | **Nullification** | Hide from unauthorized | `NULL` |
+-- MAGIC | **Full redaction** | SSN, passwords | `'***-**-****'` literal |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Converting Oracle Masking Policies
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle VPD Context</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Unity Catalog</span> |
+-- MAGIC |-------------------|-------------------------------|
+-- MAGIC | `SYS_CONTEXT('USERENV','SESSION_USER')` | `current_user()` |
+-- MAGIC | `SYS_CONTEXT('SYS_SESSION_ROLES','ROLE')` | `is_account_group_member('group')` |
+-- MAGIC | `DBMS_SESSION.IS_ROLE_ENABLED('ROLE')` | `is_account_group_member('group')` |
+-- MAGIC | `STANDARD_HASH(val, 'SHA256')` | `sha2(val, 256)` |
+-- MAGIC | `REGEXP_REPLACE(val, '.', '*')` | `mask(val)` |
+-- MAGIC | `CONCAT('***', SUBSTR(val, -4))` | `CONCAT('***', RIGHT(val, 4))` |
+-- MAGIC | `CASE WHEN condition THEN val ELSE 'REDACTED' END` | `IF(condition, val, 'REDACTED')` |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Attribute-Based Access Control (ABAC)
+-- MAGIC
+-- MAGIC ABAC in Unity Catalog provides centralized, tag-driven policy management. Oracle has no direct ABAC equivalent — centralized row and column security in Oracle is achieved through VPD policy functions registered per object via `DBMS_RLS`. Unity Catalog ABAC is a distinct governance layer using **governed tags** and **policies** that inherit automatically across catalog hierarchies.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Key ABAC Components
+-- MAGIC
+-- MAGIC | Component | Description |
+-- MAGIC |-----------|-------------|
+-- MAGIC | **Governed tags** | Account-level tag definitions with controlled allowed values (UI or API) |
+-- MAGIC | **Policies** | Row filter or column mask rules attached to catalogs, schemas, or tables |
+-- MAGIC | **UDFs** | Functions that implement filter/mask logic, referenced by policies |
+-- MAGIC | **Inheritance** | Policies defined at catalog/schema level apply to all child objects |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Compute Requirement</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">ABAC requires <b>Databricks Runtime 16.4+</b> or <b>serverless compute</b>. Users on older runtimes cannot access ABAC-secured tables. As a workaround, configure policies to apply only to specific groups - users outside those groups can still access tables using older runtimes.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Governed vs Regular Tags</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <b>ABAC policies only work with governed tags</b> - regular tags cannot be used for access control.
+-- MAGIC             </p>
+-- MAGIC             <table style="margin: 12px 0 0 0; border-collapse: collapse; width: 100%;">
+-- MAGIC                 <tr style="background: #bbdefb;">
+-- MAGIC                     <th style="padding: 8px; text-align: left; border: 1px solid #90caf9;">Aspect</th>
+-- MAGIC                     <th style="padding: 8px; text-align: left; border: 1px solid #90caf9;">Governed Tags</th>
+-- MAGIC                     <th style="padding: 8px; text-align: left; border: 1px solid #90caf9;">Regular Tags</th>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;"><b>Definition</b></td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">UI only (Catalog Explorer)</td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">Implicit (created on first use)</td>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;"><b>Apply</b></td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;"><code>SET TAG</code> (requires <code>ASSIGN</code>)</td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;"><code>SET TAG</code></td>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;"><b>Values</b></td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">Predefined allowed values only</td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">Any value</td>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;"><b>ABAC</b></td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">✅ Yes</td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">❌ No</td>
+-- MAGIC                 </tr>
+-- MAGIC                 <tr>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;"><b>Use case</b></td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">Access control, compliance</td>
+-- MAGIC                     <td style="padding: 8px; border: 1px solid #90caf9;">Search, discovery, organization</td>
+-- MAGIC                 </tr>
+-- MAGIC             </table>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### ABAC Architecture
+-- MAGIC
+-- MAGIC Policies are defined once and applied to data assets based on governed tags, either through direct assignment or inheritance from parent catalogs/schemas.
+-- MAGIC
+-- MAGIC <br/>
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph Definition["Policy Definition"]
+-- MAGIC         direction TB
+-- MAGIC         TAG["Governed Tag"]
+-- MAGIC         UDF["UDF"]
+-- MAGIC         POL["ABAC Policy"]
+-- MAGIC     end
+-- MAGIC     subgraph Application["Policy Application"]
+-- MAGIC         OBJ["Catalog / Schema / Table"]
+-- MAGIC     end
+-- MAGIC     subgraph Runtime["Query Time"]
+-- MAGIC         direction TB
+-- MAGIC         USER["User Query"]
+-- MAGIC         DATA["Filtered/Masked Results"]
+-- MAGIC     end
+-- MAGIC     TAG --> POL
+-- MAGIC     UDF --> POL
+-- MAGIC     POL -->|"Attach or Inherit"| OBJ
+-- MAGIC     USER --> OBJ
+-- MAGIC     OBJ --> DATA
+-- MAGIC     style Definition fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+-- MAGIC     style Application fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+-- MAGIC     style Runtime fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <script type="module">
+-- MAGIC import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+-- MAGIC mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Step 1: Create Governed Tags
+-- MAGIC
+-- MAGIC Unity Catalog governed tags can be created via the Catalog Explorer UI (there is no SQL DDL command for this at present):
+-- MAGIC
+-- MAGIC 1. Navigate to **Catalog** -> **Governed Tags** -> **Create governed tag**
+-- MAGIC 2. Enter tag key: `region`
+-- MAGIC 3. Add allowed values: `apac`, `emea`, `amer`, `all`
+-- MAGIC 4. Click **Create**
+-- MAGIC
+-- MAGIC | Aspect | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="16" height="16" style="vertical-align: middle;"> Unity Catalog</span> |
+-- MAGIC |--------|-----------|
+-- MAGIC | Create tag definition | UI or API |
+-- MAGIC | Apply tag to column | `ALTER TABLE ... ALTER COLUMN ... SET TAGS ('tag_name')` |
+-- MAGIC | Remove tag | `ALTER TABLE ... ALTER COLUMN ... UNSET TAGS ('tag_name')` |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">🔧</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Programmatic Tag Policy Management</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 You can automate the definition of Governed Tags using the REST API or Python SDK:
+-- MAGIC             </p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <b>REST API:</b> <code>POST /api/2.1/tag-policies</code><br/>
+-- MAGIC                 <a href="https://docs.databricks.com/api/workspace/tagpolicies/createtagpolicy" target="_blank">API Documentation</a>
+-- MAGIC             </p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <b>Python SDK:</b> <code>databricks.sdk.service.tags.TagPoliciesAPI</code><br/>
+-- MAGIC                 <a href="https://databricks-sdk-py.readthedocs.io/en/latest/workspace/tags/tag_policies.html" target="_blank">SDK Documentation</a>
+-- MAGIC             </p>
+-- MAGIC             <details>
+-- MAGIC             <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Create tag policy using SDK</summary>
+-- MAGIC                 <div class="code-block" data-language="python"># Python SDK example
+-- MAGIC from databricks.sdk import WorkspaceClient
+-- MAGIC
+-- MAGIC w = WorkspaceClient()
+-- MAGIC w.tag_policies.create_tag_policy(
+-- MAGIC     tag_key="pii",
+-- MAGIC     description="Identifies PII data for ABAC policies",
+-- MAGIC     values=[
+-- MAGIC         {"name": "ssn"},
+-- MAGIC         {"name": "email"},
+-- MAGIC         {"name": "phone"}
+-- MAGIC     ]
+-- MAGIC )</div>
+-- MAGIC             </details>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;">' +
+-- MAGIC                     '<code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Step 2: Apply Tags to Columns
+-- MAGIC
+-- MAGIC With governed tags defined, use `ALTER TABLE ... ALTER COLUMN ... SET TAGS` to assign them to columns:
+-- MAGIC
+-- MAGIC - **System governed tags**: Pre-defined by Databricks for common data classifications (e.g., `class.us_ssn`, `class.email_address`)
+-- MAGIC - **User-defined governed tags**: Custom tags created via UI/API for your specific use cases
+-- MAGIC
+-- MAGIC System governed tags are key-only (no value). User-defined governed tags may have predefined allowed values.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Required Privileges</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <code>APPLY TAG</code> on the object<br/>
+-- MAGIC                 <code>USE SCHEMA</code> on the parent schema<br/>
+-- MAGIC                 <code>USE CATALOG</code> on the parent catalog<br/>
+-- MAGIC                 For governed tags: <code>ASSIGN</code> permission on the tag
+-- MAGIC             </p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Step 3: Create Filter/Mask UDFs
+-- MAGIC
+-- MAGIC ABAC policies reference UDFs that implement the filter or mask logic. The UDF receives column values as input and returns:
+-- MAGIC
+-- MAGIC - **Row filters**: `BOOLEAN` - `TRUE` to show the row, `FALSE` to hide it
+-- MAGIC - **Column masks**: Same type as the input column - the original or masked value
+-- MAGIC
+-- MAGIC **Important:** In ABAC, the **policy** defines WHO is affected (via the `TO` clause). The **UDF** only defines WHAT data they can see based on the column value - it should not contain `is_account_group_member()` logic.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Step 4: Create the ABAC Policy
+-- MAGIC
+-- MAGIC Policies bind UDFs to tagged columns. When a user queries a table, Unity Catalog evaluates which policies apply based on the governed tags present on the columns. The `MATCH COLUMNS` clause uses `hasTag()` to identify columns by their tag assignments.
+-- MAGIC
+-- MAGIC Policies can be scoped to:
+-- MAGIC - `ON TABLE catalog.schema.table` - applies to a single table only
+-- MAGIC - `ON SCHEMA catalog.schema` - applies to all tables in the schema (inherited)
+-- MAGIC - `ON CATALOG catalog` - applies to all tables in the catalog (inherited)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #9c27b0; background: #f3e5f5; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #6a1b9a; font-size: 1.1em;">Creating ABAC Policies via Catalog Explorer</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 ABAC policies can be created via the Catalog Explorer UI as well by following the steps below:
+-- MAGIC             </p>
+-- MAGIC             <ol style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Navigate to <b>Catalog</b> -> select your catalog</li>
+-- MAGIC                 <li>Click the <b>Policies</b> tab -> <b>New policy</b></li>
+-- MAGIC                 <li>Configure: Name, Applied to, Except for, Scope, Purpose, Conditions, Function parameters</li>
+-- MAGIC                 <li>Click <b>Create policy</b></li>
+-- MAGIC             </ol>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #f44336; background: #ffebee; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">🚫</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #c62828; font-size: 1.1em;">ABAC and Manual Row Filters Cannot Coexist</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 Unity Catalog enforces <b>one row filter per table per user</b> at runtime. ABAC policies cannot be applied to tables that already have manual row filters - these must be removed first:
+-- MAGIC             </p>
+-- MAGIC <div class="code-block" data-language="sql">ALTER TABLE catalog.schema.table DROP ROW FILTER;</div>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 Attempting to combine both will result in: <code>UC_ABAC_MULTIPLE_ROW_FILTERS</code>
+-- MAGIC             </p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">When to Use ABAC vs Manual Filters/Masks</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <b>Use ABAC when:</b> You need centralized governance across many tables with policy inheritance.<br/>
+-- MAGIC                 <b>Use manual filters/masks when:</b> You need isolated per-table logic or aren't yet using governed tags.
+-- MAGIC             </p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Oracle vs Unity Catalog ABAC Comparison
+-- MAGIC
+-- MAGIC | Aspect | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="16" height="16" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="16" height="16" style="vertical-align: middle;"> Unity Catalog</span> |
+-- MAGIC |--------|-----------|---------------|
+-- MAGIC | Foundation | No native ABAC; VPD policy functions registered per object via `DBMS_RLS` | ABAC is a distinct governance layer |
+-- MAGIC | Tag scope | No tag system for access control | Account-level governed tags (UI or API) |
+-- MAGIC | Tag assignment | N/A — policies bound directly to tables/views | `SET TAG ON ...` |
+-- MAGIC | Policy-to-tag binding | `DBMS_RLS.ADD_POLICY(object_schema, object_name, policy_name, func_schema, policy_function)` | `CREATE POLICY ... MATCH COLUMNS hasTag()` |
+-- MAGIC | Identity context | `SYS_CONTEXT('USERENV','SESSION_USER')`, `DBMS_SESSION.IS_ROLE_ENABLED()` | `is_account_group_member()`, `current_user()` |
+-- MAGIC | Inheritance | Manual per-object, no inheritance | Automatic to child objects |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 7. Dynamic Views for Secure Data Sharing
+-- MAGIC
+-- MAGIC Dynamic views embed security logic directly in SQL, providing an alternative to row filters and column masks. They're particularly useful for:
+-- MAGIC
+-- MAGIC - **Read-only sharing** scenarios, including Delta Sharing
+-- MAGIC - **Joining secured data** from multiple tables
+-- MAGIC - **Complex transformations** that combine filtering and masking
+-- MAGIC
+-- MAGIC | Function | Description |
+-- MAGIC |----------|-------------|
+-- MAGIC | `current_user()` | Returns the current user's email address |
+-- MAGIC | `is_account_group_member()` | Returns `TRUE` if user is a member of an account-level group |
+-- MAGIC | `current_recipient()` | Returns the recipient name when data is accessed via Delta Sharing |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Dynamic Views vs Row Filters/Column Masks</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <b>Use dynamic views when:</b> Sharing via Delta Sharing, joining multiple tables, or applying complex transformation logic.<br/>
+-- MAGIC                 <b>Use row filters/column masks when:</b> You want security applied transparently without creating new objects.
+-- MAGIC             </p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 8. Documenting Grants and Inheritance
+-- MAGIC
+-- MAGIC Proper documentation of your permission model is essential for auditing, compliance, and ongoing maintenance.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Extracting Oracle Grants for Conversion
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Extract all object privileges (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Extract table and view object-level grants
+-- MAGIC SELECT
+-- MAGIC     grantee,
+-- MAGIC     owner AS schema_name,
+-- MAGIC     table_name AS object_name,
+-- MAGIC     'TABLE' AS object_type,
+-- MAGIC     privilege,
+-- MAGIC     grantable,
+-- MAGIC     hierarchy
+-- MAGIC FROM dba_tab_privs
+-- MAGIC WHERE owner NOT IN ('SYS','SYSTEM','XDB','MDSYS','ORDSYS','DBSNMP','OUTLN')
+-- MAGIC   AND privilege IN ('SELECT','INSERT','UPDATE','DELETE','REFERENCES')
+-- MAGIC ORDER BY owner, table_name, grantee, privilege;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Extract role hierarchy (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Extract role-to-role grants (role hierarchy)
+-- MAGIC SELECT
+-- MAGIC     grantee AS child_role,
+-- MAGIC     granted_role AS parent_role,
+-- MAGIC     admin_option,
+-- MAGIC     default_role
+-- MAGIC FROM dba_role_privs
+-- MAGIC WHERE grantee IN (SELECT role FROM dba_roles)
+-- MAGIC ORDER BY parent_role, child_role;
+-- MAGIC
+-- MAGIC -- All roles and their attributes
+-- MAGIC SELECT role, password_required, authentication_type
+-- MAGIC FROM dba_roles
+-- MAGIC ORDER BY role;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Extract user-to-role assignments (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Map users to their granted roles
+-- MAGIC SELECT
+-- MAGIC     grantee AS user_name,
+-- MAGIC     granted_role AS role_name,
+-- MAGIC     admin_option,
+-- MAGIC     default_role
+-- MAGIC FROM dba_role_privs
+-- MAGIC WHERE grantee IN (SELECT username FROM dba_users WHERE account_status = 'OPEN')
+-- MAGIC ORDER BY role_name, user_name;
+-- MAGIC
+-- MAGIC -- System privileges granted directly to users
+-- MAGIC SELECT
+-- MAGIC     grantee AS user_name,
+-- MAGIC     privilege AS system_privilege,
+-- MAGIC     admin_option
+-- MAGIC FROM dba_sys_privs
+-- MAGIC WHERE grantee IN (SELECT username FROM dba_users WHERE account_status = 'OPEN')
+-- MAGIC ORDER BY user_name, privilege;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Permission Inheritance</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Unity Catalog permissions inherit downward by default. A <code>SELECT</code> grant on a schema applies to all current and future tables in that schema. The <code>inherited_from</code> column in <code>information_schema</code> privilege views indicates where a grant originated. Document your inheritance model carefully and grant at the most specific level needed to follow the principle of least privilege.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Security Implementation Checklist</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Oracle row access policies extracted and documented</li>
+-- MAGIC                 <li>Oracle masking policies extracted and documented</li>
+-- MAGIC                 <li>Row filter functions created and tested</li>
+-- MAGIC                 <li>Column mask functions created and tested</li>
+-- MAGIC                 <li>Governed tags defined and applied for ABAC</li>
+-- MAGIC                 <li>Dynamic views created for secure sharing</li>
+-- MAGIC                 <li>Grants converted from Oracle RBAC model</li>
+-- MAGIC                 <li>Permission inheritance documented</li>
+-- MAGIC                 <li>Security audit queries saved for ongoing compliance</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Summary
+-- MAGIC
+-- MAGIC This lesson covered implementing fine-grained access control in Unity Catalog, mapping security patterns from Oracle to their Databricks equivalents.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Security Feature Mapping
+-- MAGIC
+-- MAGIC | Capability | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="16" height="16" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="16" height="16" style="vertical-align: middle;"> Unity Catalog</span> |
+-- MAGIC |------------|-----------|---------------|
+-- MAGIC | Row-level security | Row-Level Security (VPD) | Row Filters |
+-- MAGIC | Column-level security | Column-level grants / Data Masking | Column Masks |
+-- MAGIC | Policy functions | `SYS_CONTEXT('USERENV','SESSION_USER')`, `DBMS_SESSION.IS_ROLE_ENABLED()` | `is_account_group_member()`, `current_user()` |
+-- MAGIC | Centralized policy management | VPD policy functions via `DBMS_RLS` (per-object) | ABAC with governed tags (inherited) |
+-- MAGIC | Secure data sharing | Secure Views | Dynamic Views |
+-- MAGIC | Tag management | No equivalent | Governed tags (UI or API) |
+-- MAGIC | Permission auditing | `DBA_TAB_PRIVS`, `DBA_ROLE_PRIVS`, `DBA_SYS_PRIVS` | `information_schema` privilege views |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Key Takeaways
+-- MAGIC
+-- MAGIC - **Row Filters**: Use `is_account_group_member()` for best performance; align filter columns with Liquid Clustering keys
+-- MAGIC - **Column Masks**: Use the built-in `mask()` function where possible; create reusable UDFs for custom logic
+-- MAGIC - **ABAC**: Define governed tags via UI or API; policies inherit automatically from catalog to schema to table
+-- MAGIC - **Dynamic Views**: Use for Delta Sharing scenarios, multi-table joins, or complex transformation logic
+-- MAGIC - **Grants**: Use `information_schema` views to audit privileges; check `inherited_from` to trace grant origins
+-- MAGIC - **Coexistence**: Manual row filters and ABAC policies cannot coexist on the same table
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### References
+-- MAGIC
+-- MAGIC - [Row Filters and Column Masks](https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/)
+-- MAGIC - [Unity Catalog ABAC](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/)
+-- MAGIC - [Governed Tags](https://docs.databricks.com/aws/en/admin/governed-tags/)
+-- MAGIC - [Dynamic Views](https://docs.databricks.com/aws/en/views/dynamic)
+-- MAGIC - [Tag Policies API](https://docs.databricks.com/api/workspace/tagpolicies/createtagpolicy)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

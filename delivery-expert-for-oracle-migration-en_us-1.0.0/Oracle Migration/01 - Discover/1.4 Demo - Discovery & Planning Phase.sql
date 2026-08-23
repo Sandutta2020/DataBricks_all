@@ -1,0 +1,614 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">01 - Discover</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="
+-- MAGIC   border-left: 4px solid #f44336;
+-- MAGIC   background: #ffebee;
+-- MAGIC   padding: 14px 18px;
+-- MAGIC   border-radius: 4px;
+-- MAGIC   margin: 16px 0;
+-- MAGIC ">
+-- MAGIC   <strong style="display:block; color:#c62828; margin-bottom:6px; font-size: 1.1em;">Important Prerequisites</strong>
+-- MAGIC   <div style="color:#333;">
+-- MAGIC This notebook is not supported for execution on Databricks Academy provided Vocareum workspaces.
+-- MAGIC
+-- MAGIC Please go through this guided notebook as a study guide and lecture for Oracle Migration.
+-- MAGIC
+-- MAGIC The material is intended to be run in your own sandbox environments if you would like. Databricks Academy does not provide Oracle access (on-prem, cloud-hosted, or OCI), a Databricks account with admin level access, or an AWS account for this notebook.
+-- MAGIC
+-- MAGIC Please view the PREREQUISITES file for more information.
+-- MAGIC
+-- MAGIC **However, the provided LAB notebooks at the end of each section can be run in a Databricks Academy provided Vocareum workspace and allow you to practice the concepts.**
+-- MAGIC   </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC # Demo: Discovery & Planning Phase
+-- MAGIC
+-- MAGIC Discovery involves extracting technical metadata from Oracle to build a migration plan. This demo provides the SQL and CLI commands needed to inventory assets, analyze workloads, and run automated complexity scoring.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this demo, you will be able to:
+-- MAGIC - Install Lakebridge
+-- MAGIC - Export Oracle DDLs for automated analysis
+-- MAGIC - Run the Lakebridge Analyzer to score code complexity
+-- MAGIC - Query Oracle system tables for asset and security metadata
+-- MAGIC - Analyze database workload patterns from `V$SQL` and `V$SESSION` views
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Compute Requirements
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC   <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC     <span style="font-size: 24px;">🚨</span>
+-- MAGIC     <div>
+-- MAGIC       <strong style="color: #1565c0; font-size: 1.1em;">REQUIRED – SQL WAREHOUSE OR SERVERLESS COMPUTE</strong>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;">This notebook runs on both <strong>SQL Warehouse</strong> and <strong>Serverless compute</strong>. Select your preferred compute resource before executing any cells.</p>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;"><strong>Testing configuration:</strong> This demo was tested using SQL Warehouse</strong> and Serverless compute <strong>version 4</strong>. For more details on Serverless versions, see the <a href="https://docs.databricks.com/aws/en/compute/serverless/dependencies" style="color: #1565c0; text-decoration: none; font-weight: 500;">Databricks documentation</a>.</p>
+-- MAGIC     </div>
+-- MAGIC   </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 1. Automated Discovery with Lakebridge
+-- MAGIC
+-- MAGIC In SQL Developer, find **Tools -> Database export** to export all data from the `HR` schema. 
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Step 1.1: Export Database with SQL Developer
+-- MAGIC
+-- MAGIC Follow these steps to export your schema from Oracle.
+-- MAGIC
+-- MAGIC 1. Connect to the database
+-- MAGIC 1. Go to Tools -> Database Export
+-- MAGIC 1. The Export Wizard opens
+-- MAGIC 1. Make sure **Export DDL** is selected
+-- MAGIC 1. Make sure **Export Data** is selected with **insert** format
+-- MAGIC 1. Toggle _Save As_ from Single File to **Separate Files**
+-- MAGIC 1. Click Next
+-- MAGIC 1. On the next page, make sure everything under **Standard Object Types** is selected
+-- MAGIC 1. Click Finish
+-- MAGIC
+-- MAGIC <div style="width:100%; margin:auto; font-family:sans-serif;">
+-- MAGIC
+-- MAGIC   <!-- Tab buttons -->
+-- MAGIC   <div style="display:flex; border-bottom:2px solid #e0e0e0; margin-bottom:0;">
+-- MAGIC     <button class="dbtab" onclick="showTab(1)" style="padding:10px 18px; border:none; border-bottom:3px solid #1976d2; background:none; font-size:13px; font-weight:bold; color:#1976d2; cursor:pointer; margin-bottom:-2px;">1. SQL Developer</button>
+-- MAGIC     <button class="dbtab" onclick="showTab(2)" style="padding:10px 18px; border:none; border-bottom:3px solid transparent; background:none; font-size:13px; font-weight:bold; color:#888; cursor:pointer; margin-bottom:-2px;">2. Source and Destination</button>
+-- MAGIC     <button class="dbtab" onclick="showTab(3)" style="padding:10px 18px; border:none; border-bottom:3px solid transparent; background:none; font-size:13px; font-weight:bold; color:#888; cursor:pointer; margin-bottom:-2px;">3. Select Data Types</button>
+-- MAGIC     <button class="dbtab" onclick="showTab(4)" style="padding:10px 18px; border:none; border-bottom:3px solid transparent; background:none; font-size:13px; font-weight:bold; color:#888; cursor:pointer; margin-bottom:-2px;">4. Exported SQL</button>
+-- MAGIC   </div>
+-- MAGIC
+-- MAGIC   <!-- Tab panels -->
+-- MAGIC   <div class="dbpanel" style="display:block;">
+-- MAGIC     <img src="../assets/images/sql_developer_start.png" style="width:100%; height:600px; object-fit:scale-down; display:block;">
+-- MAGIC     <div style="color:#444; font-size:13px; padding:10px 4px;">SQL Developer start screen</div>
+-- MAGIC   </div>
+-- MAGIC
+-- MAGIC   <div class="dbpanel" style="display:none;">
+-- MAGIC     <img src="../assets/images/export_wizard_1.png" style="width:100%; height:600px; object-fit:scale-down; display:block;">
+-- MAGIC     <div style="color:#444; font-size:13px; padding:10px 4px;">Select source and Destination information</div>
+-- MAGIC   </div>
+-- MAGIC
+-- MAGIC   <div class="dbpanel" style="display:none;">
+-- MAGIC     <img src="../assets/images/export_wizard_2.png" style="width:100%; height:600px; object-fit:scale-down; display:block;">
+-- MAGIC     <div style="color:#444; font-size:13px; padding:10px 4px;">Select data types to export</div>
+-- MAGIC   </div>
+-- MAGIC
+-- MAGIC   <div class="dbpanel" style="display:none;">
+-- MAGIC     <img src="../assets/images/exported_data.png" style="width:100%; height:600px; object-fit:scale-down; display:block;">
+-- MAGIC     <div style="color:#444; font-size:13px; padding:10px 4px;">The exported SQL file</div>
+-- MAGIC   </div>
+-- MAGIC
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC function showTab(n) {
+-- MAGIC   var tabs   = document.getElementsByClassName("dbtab");
+-- MAGIC   var panels = document.getElementsByClassName("dbpanel");
+-- MAGIC   for (var i = 0; i < tabs.length; i++) {
+-- MAGIC     tabs[i].style.color = "#888";
+-- MAGIC     tabs[i].style.borderBottom = "3px solid transparent";
+-- MAGIC     panels[i].style.display = "none";
+-- MAGIC   }
+-- MAGIC   tabs[n-1].style.color = "#1976d2";
+-- MAGIC   tabs[n-1].style.borderBottom = "3px solid #1976d2";
+-- MAGIC   panels[n-1].style.display = "block";
+-- MAGIC }
+-- MAGIC window.onload = function() { showTab(1); };
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Step 1.2 Install Lakebridge
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC # Install Lakebridge (part of Databricks Labs)
+-- MAGIC databricks labs install lakebridge
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### Step 1.3 Run Lakebridge Analyzer
+-- MAGIC
+-- MAGIC Run the analyzer on the exported SQL files.
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC # Analyze Oracle SQL for compatibility assessment
+-- MAGIC # Generates Excel report with complexity scores and function inventory
+-- MAGIC databricks labs lakebridge analyze \
+-- MAGIC   --source-tech Oracle \
+-- MAGIC   --source-directory ./tables \
+-- MAGIC   --report-file ./analysis_report.xlsx
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Step 1.4 Understand the results
+-- MAGIC
+-- MAGIC Open the generated Excel sheet and investigate it. It will contain the discovered data and code assets along with their estimated complexity.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Lakebridge Analysis Report</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">The <code>analyze</code> command generates an Excel report with multiple sheets:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><b>Summary</b> - Code complexity categorization (LOW/MEDIUM/HIGH/VERY_HIGH)</li>
+-- MAGIC                 <li><b>SQL Programs</b> - List of scripts with line counts and complexity scores</li>
+-- MAGIC                 <li><b>Functions</b> - All functions used and call counts (identifies conversion candidates)</li>
+-- MAGIC                 <li><b>SQL Data Types</b> - Data types requiring mapping (<code>TIME</code>, <code>NUMBER</code>, etc.)</li>
+-- MAGIC                 <li><b>Referenced Objects</b> - Tables/views with CREATE/READ/WRITE operations</li>
+-- MAGIC                 <li><b>Script Categories</b> - DDL types (<code>CREATE_VIEW</code>, <code>TABLE_DDL</code>, etc.)</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Use this report to estimate migration effort and identify patterns requiring manual review.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 2. Manual Metadata Discovery
+-- MAGIC
+-- MAGIC The following queries should be executed in an Oracle worksheet (SQL Developer, SQL Plus, or Toad) to gather detailed object metadata.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Using <code>remote_query</code></strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">The <code>remote_query</code> command allows us to run Oracle-specific queries through the federated connection. If you have set up your federation SVC with access to system tables, you can run these queries from Databricks, too, with <code>remote_query</code>. <a href="https://docs.databricks.com/aws/en/query-federation/remote-queries" target="_blank">Learn more here.</a></p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### 2.1 Schema and Table Inventory
+-- MAGIC
+-- MAGIC Inventory schemas and object counts
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Inventory schemas and object counts 
+-- MAGIC SELECT
+-- MAGIC     owner AS schema_name,
+-- MAGIC     COUNT(CASE WHEN object_type = 'TABLE' THEN 1 END) AS table_count,
+-- MAGIC     COUNT(CASE WHEN object_type = 'VIEW' THEN 1 END) AS view_count
+-- MAGIC FROM ALL_OBJECTS
+-- MAGIC WHERE owner NOT IN ('SYS','SYSTEM')
+-- MAGIC GROUP BY owner
+-- MAGIC ORDER BY table_count DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC Detailed table size and row count inventory
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Detailed table size and row count inventory
+-- MAGIC SELECT
+-- MAGIC     owner AS schema_name,
+-- MAGIC     table_name,
+-- MAGIC     num_rows,
+-- MAGIC     ROUND(blocks * 8 / 1024, 2) AS size_mb,
+-- MAGIC     last_analyzed
+-- MAGIC FROM ALL_TABLES
+-- MAGIC WHERE owner = 'HR' -- Replace with your schema
+-- MAGIC ORDER BY size_mb DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC Optionally, if you set up the federated connection with elevated privileges, you can run these queries right from Databricks, as well.
+-- MAGIC
+-- MAGIC **Note:** In a notebook cell, you have to escape the `$` in `V$SQL`, but that is not required in the SQL Editor.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Run a Query Through a Connection
+-- Run a query through a federated connection
+SELECT
+  *
+FROM
+  remote_query(
+    'oracle_federation',
+    service_name => 'ORCL',
+    query =>"
+SELECT
+    parsing_schema_name AS schema_name,
+    COUNT(*) AS sql_statements,
+    SUM(executions) AS total_executions,
+    ROUND(SUM(elapsed_time)/1000000,2) AS total_seconds
+FROM V\$SQL
+GROUP BY parsing_schema_name
+ORDER BY total_executions DESC;
+");
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### 2.2 Jobs, Triggers and Procedures
+-- MAGIC
+-- MAGIC Inventory Scheduler Jobs
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Inventory Scheduler Jobs
+-- MAGIC SELECT owner, job_name, enabled, state, repeat_interval, job_action
+-- MAGIC FROM DBA_SCHEDULER_JOBS
+-- MAGIC ORDER BY owner, job_name;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC Inventory triggers
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Inventory triggers
+-- MAGIC SELECT owner, trigger_name, table_name, status FROM ALL_TRIGGERS;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC Inventory procedures
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Inventory procedures
+-- MAGIC SELECT owner, object_name AS procedure_name, last_ddl_time
+-- MAGIC FROM ALL_OBJECTS
+-- MAGIC WHERE object_type = 'PROCEDURE';
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 3. Workload and Security Analysis
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### 3.1 Workload Patterns
+-- MAGIC
+-- MAGIC Active session summary by user
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Active session summary by user
+-- MAGIC SELECT username, COUNT(*) AS active_sessions
+-- MAGIC FROM V$SESSION WHERE type = 'USER'
+-- MAGIC GROUP BY username;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC Top SQL execution stats by schema
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Top SQL execution stats by schema
+-- MAGIC SELECT
+-- MAGIC     parsing_schema_name AS schema_name,
+-- MAGIC     COUNT(*) AS sql_statements,
+-- MAGIC     SUM(executions) AS total_executions,
+-- MAGIC     ROUND(SUM(elapsed_time)/1000000,2) AS total_seconds
+-- MAGIC FROM V$SQL
+-- MAGIC GROUP BY parsing_schema_name
+-- MAGIC ORDER BY total_executions DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### 3.2 Security and Grants
+-- MAGIC
+-- MAGIC Role grants hierarchy
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Role grants hierarchy
+-- MAGIC SELECT grantee, granted_role
+-- MAGIC FROM DBA_ROLE_PRIVS
+-- MAGIC WHERE grantee = 'HR';
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC Object-level privileges
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Object-level privileges
+-- MAGIC SELECT owner, table_name, privilege, grantee
+-- MAGIC FROM DBA_TAB_PRIVS
+-- MAGIC WHERE grantee = 'HR';
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC Privileges granted to the current user
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Direct privileges
+-- MAGIC SELECT privilege FROM USER_SYS_PRIVS;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC Privileges granted to the current user through roles
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Role-based privileges
+-- MAGIC SELECT granted_role FROM USER_ROLE_PRIVS;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                 '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                 '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC             '</div>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC         block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC             var t = document.createElement('textarea');
+-- MAGIC             t.value = code;
+-- MAGIC             document.body.appendChild(t);
+-- MAGIC             t.select();
+-- MAGIC             document.execCommand('copy');
+-- MAGIC             document.body.removeChild(t);
+-- MAGIC             this.textContent = '✓ Copied!';
+-- MAGIC             setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC         };
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

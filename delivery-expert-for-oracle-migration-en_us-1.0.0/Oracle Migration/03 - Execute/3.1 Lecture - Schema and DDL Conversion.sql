@@ -1,0 +1,733 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">03 - Execute</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Schema and DDL Conversion
+-- MAGIC
+-- MAGIC This lesson covers the translation of Oracle DDL statements to Databricks SQL and Unity Catalog. You will convert table definitions, views, materialized views, and adapt datatypes and constraints to Delta Lake semantics.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Translate Oracle DDL to Unity Catalog Delta DDL
+-- MAGIC - Map Oracle datatypes to Databricks SQL equivalents
+-- MAGIC - Convert views and materialized views with proper syntax adjustments
+-- MAGIC - Adapt constraints, clustering, and table properties for Delta Lake
+-- MAGIC - Use Lakebridge to accelerate DDL conversion at scale
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 1. DDL Extraction Workflow
+-- MAGIC
+-- MAGIC Schema conversion follows a structured approach: extract metadata from Oracle, transform DDL syntax, and deploy to Unity Catalog.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph OR["Oracle"]
+-- MAGIC         DDL["DDL Extraction<br/><i>INFORMATION_SCHEMA</i>"]
+-- MAGIC         EXP["GET_DDL()"]
+-- MAGIC     end
+-- MAGIC     subgraph CONVERT["Conversion"]
+-- MAGIC         MAP["Datatype<br/>Mapping"]
+-- MAGIC         SYN["Syntax<br/>Adjustment"]
+-- MAGIC         VAL["Validation"]
+-- MAGIC     end
+-- MAGIC     subgraph DB["Databricks"]
+-- MAGIC         UC["Unity Catalog<br/>DDL"]
+-- MAGIC         DELTA["Delta Tables"]
+-- MAGIC     end
+-- MAGIC     DDL --> MAP
+-- MAGIC     EXP --> MAP
+-- MAGIC     MAP --> SYN --> VAL --> UC --> DELTA
+-- MAGIC     style OR fill:#fff,stroke:#F80102,stroke-width:2px
+-- MAGIC     style CONVERT fill:#fff,stroke:#607d8b,stroke-width:2px
+-- MAGIC     style DB fill:#fff,stroke:#FF3621,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 2. Datatype Mapping Reference
+-- MAGIC
+-- MAGIC Most Oracle datatypes map directly to Databricks equivalents. During migration, the most common conversions involve numeric, character, date/time, and large object types.
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle Type</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks Type</span> | Notes |
+-- MAGIC |------------------|----------------------|-------|
+-- MAGIC | `VARCHAR2(n)` | `STRING` | Databricks `STRING` is unbounded; no length limit |
+-- MAGIC | `CHAR(n)` | `STRING` | No fixed-length char in Databricks |
+-- MAGIC | `NUMBER(p,s)` | `DECIMAL(p,s)` | Databricks: max precision 38 |
+-- MAGIC | `NUMBER(38,0)` | `BIGINT` | Use `BIGINT` for integer keys and IDs |
+-- MAGIC | `INT` / `INTEGER` | `INT` | Direct mapping |
+-- MAGIC | `BIGINT` | `BIGINT` | Direct mapping |
+-- MAGIC | `FLOAT` | `FLOAT` or `DOUBLE` | Direct mapping |
+-- MAGIC | `BINARY_FLOAT` | `FLOAT` | Oracle single-precision floating type |
+-- MAGIC | `DOUBLE` | `DOUBLE` | Direct mapping |
+-- MAGIC | `BINARY_DOUBLE` | `DOUBLE` | Oracle double-precision floating type |
+-- MAGIC | `DATE` | `TIMESTAMP` | Oracle DATE includes time component |
+-- MAGIC | `TIMESTAMP_TZ` | `TIMESTAMP` | Store offset in separate column if needed |
+-- MAGIC | `BINARY` | `BINARY` | Direct mapping |
+-- MAGIC | `CLOB` | `STRING` | Large text object |
+-- MAGIC | `BLOB` | `BINARY` | Binary large object |
+-- MAGIC | `RAW(n)` | `BINARY` | Fixed-length binary data |
+-- MAGIC | `XMLTYPE` | `STRING` | Typically stored as XML text |
+-- MAGIC
+-- MAGIC Oracle's `NUMBER` can be defined without scale and precision. In such cases, analyze the existing data to determine the appropriate scale and precision. Use `DECIMAL` what the values fall within `1<=p<=38`, `0<=s<=p`; otherwise, use `DOUBLE`. Always test thoroughly to ensure the chosen type meets both precision and efficiency requirements.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 3. Table DDL Conversion
+-- MAGIC
+-- MAGIC This section demonstrates converting tables from Oracle to Databricks Delta tables. Examples cover the key conversion patterns you'll encounter.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Standard Table Conversion
+-- MAGIC
+-- MAGIC Standard datatypes are farily simple to migrate to Databricks, with some things to note:
+-- MAGIC
+-- MAGIC - Several keywords in Oracle's `CREATE TABLE` statement are no longer valid, such as `TABLESPACE`, `INDEX`, etc.
+-- MAGIC - Databricks supports `IDENTITY` on `BIGINT` columns only
+-- MAGIC - Table options, such as indexes are not applicable on Delta tables
+-- MAGIC - When converting primary and secondary indexes to partitions in Delta tables, caution must be exercised. Overpartitioning can lead to small file problems, compromising performance in the Lakehouse architecture. Consider Liquid Clustering instead.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Constraints Migration
+-- MAGIC
+-- MAGIC Constraints are often similar in syntax between the two platforms, such as `PRIMARY KEY`, but they are handled in different ways.
+-- MAGIC
+-- MAGIC | Feature | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | Comments |
+-- MAGIC |---------|-----------|------------|-------------|
+-- MAGIC | **`PRIMARY KEY`** | Enforced | Informational (not enforced) | Metadata only; use `RELY` for query optimization, enforce via Lakeflow expectations |
+-- MAGIC | **`FOREIGN KEY`** | Enforced | Informational | Metadata only; referential integrity not enforced |
+-- MAGIC | **`UNIQUE`** | Enforced | Informational | Metadata only; enforce via Lakeflow expectations |
+-- MAGIC | **`NOT NULL`** | Enforced | Enforced | ✅ Enforced on write |
+-- MAGIC | **`CHECK`** | Supported | Supported | ✅ Enforced on write |
+-- MAGIC | **`DEFAULT`** | Supported | Supported | Applied at insert time |
+-- MAGIC
+-- MAGIC In the context of Databricks, the primary key being **informational** means that the system **does not enforce** the uniqueness of the column. It **is** possible to insert duplicate values. Instead, the system marks in metadata that the column is supposed to be unique, and it is the ETL pipeline's task to make sure it is unique. This is a fundamental distinction between the two systems, that originates from the Lakehouse architecture.
+-- MAGIC
+-- MAGIC Adding the `RELY` keyword tells the execution engine to rely on uniqueness. This allows some optimizations, e.g. `SELECT DISTINCT` on a `RELY`-ed `PRIMARY KEY` column will be equivalent to just `SELECT`. This is powerful, but can lead to erroneous results if the constraint is broken.
+-- MAGIC
+-- MAGIC <a href="https://docs.databricks.com/aws/en/sql/user/queries/query-optimization-constraints" target="_blank">See more on the topic under this link.</a>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Enforcing Uniqueness with Lakeflow Expectations</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">While <b><code>PRIMARY KEY</code></b> constraints are informational on Databricks, Databricks provides <b>Lakeflow Spark Declarative Pipelines expectations</b> to enforce data quality rules including uniqueness. This approach is more powerful than traditional constraints - you can fail, drop, or quarantine invalid records. You can also add more complex expectations besides uniqueness.</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Primary key uniqueness validation example:</b></p>
+-- MAGIC <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin: 8px 0; font-size: 13px; overflow-x: auto;">
+-- MAGIC @dp.view(name="pk_validation")
+-- MAGIC @dp.expect_or_fail("unique_pk", "num_entries = 1")
+-- MAGIC def validate_pk_uniqueness():
+-- MAGIC   return (
+-- MAGIC     spark.read.table("my_table")
+-- MAGIC       .groupBy("pk_column")
+-- MAGIC       .count()
+-- MAGIC       .withColumnRenamed("count", "num_entries")
+-- MAGIC   )</pre>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Options for handling violations:</b></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><code>@dp.expect_or_fail</code> - Fail the pipeline on violation</li>
+-- MAGIC                 <li><code>@dp.expect_or_drop</code> - Drop invalid records</li>
+-- MAGIC                 <li><code>@dp.expect</code> - Track metrics but allow records through</li>
+-- MAGIC                 <li><b>Quarantine pattern</b> - Route invalid records to a separate table for review</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">See <a href="https://docs.databricks.com/aws/en/data-engineering/lakeflow/spark/expectations/advanced-expectation-patterns.html" target="_blank">Advanced expectation patterns</a> for more examples.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 4. Semi-Structured Data Conversion
+-- MAGIC
+-- MAGIC Oracle often stores semi-structured data as `JSON` inside `CLOB` or `VARCHAR2` columns (validated using `IS JSON`). Oracle 21c+ versions also provide a native `JSON` datatype. When migrating to Databricks, this `JSON` data can remain flexible (`STRING` / `VARIANT`) or be converted into a typed `STRUCT` if the schema is known.
+-- MAGIC The `EMPLOYEE_REVIEWS` table demonstrates these patterns — a common HR extension where structured review data (scores, goals, completed training) is stored as JSON in a `CLOB` column.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: EMPLOYEE_REVIEWS Table with CLOB column (source)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Oracle: HR.EMPLOYEE_REVIEWS
+-- MAGIC -- Note: REVIEW_DATA contains JSON with structured performance review details
+-- MAGIC
+-- MAGIC CREATE TABLE HR.EMPLOYEE_REVIEWS (
+-- MAGIC     REVIEW_ID       NUMBER(38,0),
+-- MAGIC     EMPLOYEE_ID     NUMBER(6,0),
+-- MAGIC     REVIEW_YEAR     NUMBER(4,0),
+-- MAGIC     REVIEW_DATE     DATE,
+-- MAGIC     REVIEWER_ID     NUMBER(6,0),
+-- MAGIC     OVERALL_RATING  NUMBER(3,1),
+-- MAGIC     REVIEW_DATA     CLOB CHECK (REVIEW_DATA IS JSON),
+-- MAGIC     CONSTRAINT pk_emp_reviews PRIMARY KEY (REVIEW_ID),
+-- MAGIC     CONSTRAINT fk_emp_review  FOREIGN KEY (EMPLOYEE_ID) REFERENCES HR.EMPLOYEES(EMPLOYEE_ID),
+-- MAGIC     CONSTRAINT fk_reviewer    FOREIGN KEY (REVIEWER_ID) REFERENCES HR.EMPLOYEES(EMPLOYEE_ID)
+-- MAGIC );
+-- MAGIC
+-- MAGIC -- Querying JSON in Oracle
+-- MAGIC -- SELECT REVIEW_ID, EMPLOYEE_ID,
+-- MAGIC --        JSON_VALUE(REVIEW_DATA, '$.communication_score') AS communication_score
+-- MAGIC -- FROM HR.EMPLOYEE_REVIEWS;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Databricks - Option 1
+-- MAGIC
+-- MAGIC In this option, we store the JSON data in a STRING or VARIANT column. This allows for flexible changes in the struct schema. VARIANT is a newer feature that will bring better performance compared to JSON-as-STRING implementation.
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Conversion notes:
+-- MAGIC --   Oracle JSON (CLOB) -> STRING
+-- MAGIC --   JSON fields are accessed using colon (:) path syntax
+-- MAGIC
+-- MAGIC CREATE TABLE IF NOT EXISTS migration_dev.hr.employee_reviews (
+-- MAGIC     review_id       BIGINT,
+-- MAGIC     employee_id     INT,
+-- MAGIC     review_year     INT,
+-- MAGIC     review_date     TIMESTAMP,
+-- MAGIC     reviewer_id     INT,
+-- MAGIC     overall_rating  DECIMAL(3,1),
+-- MAGIC     review_data     STRING   -- Oracle JSON (CLOB) -> STRING
+-- MAGIC )
+-- MAGIC COMMENT 'Migrated from Oracle HR.EMPLOYEE_REVIEWS';
+-- MAGIC
+-- MAGIC -- Query JSON fields
+-- MAGIC SELECT review_id, review_data:communication_score AS communication_score
+-- MAGIC FROM migration_dev.hr.employee_reviews;
+-- MAGIC
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Databricks - Option 2
+-- MAGIC
+-- MAGIC In this option, when the schema is consistent and known in advance, we define the column type as STRUCT.
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Use when schema is consistent and known
+-- MAGIC CREATE TABLE IF NOT EXISTS migration_dev.hr.employee_reviews_typed (
+-- MAGIC     review_id       BIGINT,
+-- MAGIC     employee_id     INT,
+-- MAGIC     review_year     INT,
+-- MAGIC     review_date     TIMESTAMP,
+-- MAGIC     reviewer_id     INT,
+-- MAGIC     overall_rating  DECIMAL(3,1),
+-- MAGIC     review_data     STRUCT <
+-- MAGIC         communication_score: DECIMAL(3,1),
+-- MAGIC         technical_score:     DECIMAL(3,1),
+-- MAGIC         leadership_score:    DECIMAL(3,1),
+-- MAGIC         goals_met:           ARRAY<STRING>,
+-- MAGIC         training_completed:  ARRAY<STRING>
+-- MAGIC     >
+-- MAGIC )
+-- MAGIC COMMENT 'Migrated from Oracle HR.EMPLOYEE_REVIEWS with typed STRUCT';
+-- MAGIC
+-- MAGIC -- Query using dot notation
+-- MAGIC SELECT review_id, review_data.communication_score
+-- MAGIC FROM migration_dev.hr.employee_reviews_typed;
+-- MAGIC
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">VARIANT Type (DBR 15.3+)</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Databricks supports a native <code>VARIANT</code> type for semi-structured data such as JSON. This is the <b>recommended approach</b> when migrating JSON stored in Oracle columns.</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><b>Flexible schema</b> – JSON structure does not need to be predefined</li>
+-- MAGIC                 <li><b>Efficient storage</b> – Native binary representation optimized for semi-structured data</li>
+-- MAGIC                 <li><b>Direct JSON querying</b> – Access fields using JSON path expressions</li>
+-- MAGIC                 <li><b>Type inspection</b> – Use <code>schema_of_variant()</code> to discover the structure</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Conversion mapping:</b></p>
+-- MAGIC             <table style="margin: 8px 0; font-size: 13px; border-collapse: collapse;">
+-- MAGIC                 <tr><td style="padding: 4px 12px; border: 1px solid #ccc;">JSON stored in <code>CLOB</code> / <code>VARCHAR2</code></td><td style="padding: 4px 12px; border: 1px solid #ccc;">-></td><td style="padding: 4px 12px; border: 1px solid #ccc;"><code>VARIANT</code></td></tr>
+-- MAGIC                 <tr><td style="padding: 4px 12px; border: 1px solid #ccc;">Oracle <code>JSON</code> datatype (21c+)</td><td style="padding: 4px 12px; border: 1px solid #ccc;">-></td><td style="padding: 4px 12px; border: 1px solid #ccc;"><code>VARIANT</code></td></tr>
+-- MAGIC                 <tr><td style="padding: 4px 12px; border: 1px solid #ccc;">JSON arrays</td><td style="padding: 4px 12px; border: 1px solid #ccc;">-></td><td style="padding: 4px 12px; border: 1px solid #ccc;"><code>VARIANT</code> or <code>ARRAY&lt;type&gt;</code></td></tr>
+-- MAGIC             </table>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Use <code>STRUCT</code> only when the JSON schema is stable and you want schema enforcement during ingestion.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 5. View Conversion
+-- MAGIC
+-- MAGIC Views convert with minimal changes - primarily namespace adjustments and function syntax differences.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Common Function Conversions
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | Notes |
+-- MAGIC |-----------|------------|-------|
+-- MAGIC | `SYSDATE` | `CURRENT_TIMESTAMP()` | Current system timestamp |
+-- MAGIC | `CAST(col AS VARCHAR2(n))` | `CAST(col AS STRING)` | Type casting |
+-- MAGIC | `TRUNC(ts)` | `DATE(ts)` or `CAST(ts AS DATE)` | Extract date |
+-- MAGIC | `dt + n` | `DATE_ADD(dt, n)` | Add days |
+-- MAGIC | `dt2 - dt1` | `DATEDIFF(dt2, dt1)` | Difference in days |
+-- MAGIC | `NVL(a, b)` | `COALESCE(a, b)` or `NVL(a, b)` | Both work in Databricks |
+-- MAGIC | `JSON_VALUE(col, '$.a')` | `json_col:a` | If `col` is a `string` in Databricks |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Materialized View Conversion
+-- MAGIC
+-- MAGIC Just like Oracle, Databricks has Materialized Views, too.
+-- MAGIC
+-- MAGIC They work similarly, with one difference: query rewrite. This is an automatic feature on Oracle to improve performance. However, this does not happen on Databricks. Materialized views are treated separately from tables in the Lakehouse.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" /></span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Oracle ON COMMIT Refresh — Migration Pattern</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 Oracle materialized views with <code>REFRESH FAST ON COMMIT</code> refresh automatically at the end of every DML transaction on the base table. This is common in OLTP reporting pipelines where reports must reflect the latest committed data without a manual refresh step.
+-- MAGIC             </p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 Databricks does not support ON COMMIT refresh. A possible replacement is a Lakeflow SDP pipeline whose refresh is triggered by a table update. The possible table types are:
+-- MAGIC             </p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><b>Materialized View</b> — stores fresh results physically, e.g. after an aggregation. Updated incrementally, when possible, otherwise requires full recompute.</li>
+-- MAGIC                 <li><b>Streaming Table</b> — provides incremental updates for append-only sources.</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 For simple scheduled updates with no dpeendencies, a Databricks SQL Materialized View with a cron refresh schedule can also be used.<br/>
+-- MAGIC                 During migration, map each Oracle MV by its refresh mode and downstream SLA to choose the right Databricks pattern above.
+-- MAGIC             </p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #29B5E8; background: #E8F4FD; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" /></span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Oracle Materialized View Limitations</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Oracle MVs have significant restrictions that Databricks MVs and Lakeflow do not share:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><b>Join queries</b> – supported, but FAST refresh requires materialized view logs on all base tables</li>
+-- MAGIC                 <li><b>Analytic functions</b> – window functions are allowed but disable FAST refresh</li>
+-- MAGIC                 <li><b>User-defined functions</b> – must be deterministic for FAST refresh to be possible</li>
+-- MAGIC                 <li><b>Non-deterministic functions</b> – functions such as <code>SYSDATE</code> or <code>CURRENT_TIMESTAMP</code> prevent FAST refresh</li>
+-- MAGIC                 <li><b>No materialized view logs</b> – without logs on base tables, COMPLETE refresh is always required regardless of query type</li>
+-- MAGIC                 <li><b>Complex queries</b> – certain constructs such as subqueries or set operators may require COMPLETE refresh instead of FAST</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">If your Oracle MV works around these limitations using layered views, consider consolidating into a single Databricks MV or Lakeflow pipeline during migration.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC On Databricks, materialized views can be defined in Lakeflow SDP, which provides great dependency resolution between tables, and orchestrates refreshing, provides a pipeline event log, etc. Here, both Python and SQL language can be used.
+-- MAGIC
+-- MAGIC Materialized views can also be created using Databricks SQL. Use this case when the refresh logic (manual, triggered or scheduled) is simpler, and there is not large dependency chain between tables and MVs. (This option also creates a small, hidden pipeline under the hood.)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Choosing Between SQL MV and Lakeflow SDP</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Use Databricks SQL Materialized View when:</b></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Simple aggregations for BI dashboards</li>
+-- MAGIC                 <li>Auto-managed refresh is acceptable</li>
+-- MAGIC                 <li>SQL-only transformations</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Use Lakeflow Pipelines when:</b></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Complex multi-step transformations</li>
+-- MAGIC                 <li>Need explicit refresh scheduling</li>
+-- MAGIC                 <li>CDC or streaming source data</li>
+-- MAGIC                 <li>Data quality expectations required</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Incremental Refresh for Materialized Views</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Databricks Materialized Views support <b>incremental refresh</b> on serverless pipelines, detecting changes in source data and computing only the delta - significantly reducing compute costs compared to full refreshes.</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Supported operations for incremental refresh:</b></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><code>SELECT</code>, <code>GROUP BY</code>, <code>WITH</code> (CTEs)</li>
+-- MAGIC                 <li><code>WHERE</code>, <code>HAVING</code>, <code>QUALIFY</code></li>
+-- MAGIC                 <li>All JOIN types: <code>INNER</code>, <code>LEFT</code>, <code>RIGHT</code>, <code>FULL OUTER</code></li>
+-- MAGIC                 <li><code>UNION ALL</code>, <code>OVER</code> (window functions)</li>
+-- MAGIC                 <li>Lakeflow expectations (with some caveats)</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>For best performance</b>, enable these on source tables:</p>
+-- MAGIC <pre style="background: #f5f5f5; padding: 8px 12px; border-radius: 4px; margin: 8px 0; font-size: 13px;">ALTER TABLE my_table SET TBLPROPERTIES (
+-- MAGIC   delta.enableDeletionVectors = true,
+-- MAGIC   delta.enableRowTracking = true,
+-- MAGIC   delta.enableChangeDataFeed = true
+-- MAGIC );</pre>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">See <a href="https://docs.databricks.com/aws/en/optimizations/incremental-refresh" target="_blank">Incremental refresh for materialized views</a> for details.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 7. Oracle-Specific Object Handling
+-- MAGIC
+-- MAGIC Oracle has several proprietary object types that map to different patterns in Databricks. Here we highlight some translation approaches.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle Object</span> | Databricks Alternative | Notes |
+-- MAGIC |-------------------|------------------------|-------|
+-- MAGIC | **AI Vector Search (23ai)** | Vector Search Index + AI Functions | Use Databricks Vector Search for semantic search |
+-- MAGIC | **External Tables** | External Location + Volume | Map to Unity Catalog external locations |
+-- MAGIC | **Change Data Capture** | Change Data Feed (CDF) | Enable CDF on Delta tables for change tracking |
+-- MAGIC | **`DBMS_SCHEDULER`** | Databricks Workflow / Lakeflow | Use Jobs for scheduling, Lakeflow for pipeline orchestration |
+-- MAGIC | **GoldenGate / Streams** | Auto Loader | Continuous file ingestion from cloud storage |
+-- MAGIC | **`SEQUENCE`** | `IDENTITY` column or `UUID()` | Auto-increment via IDENTITY or generate UUIDs |
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 8. Table Options and Properties Comparison
+-- MAGIC
+-- MAGIC Both platforms support table-level properties for optimization, retention, and change tracking. The following table maps common Oracle properties to their Databricks equivalents.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC | Feature | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> |
+-- MAGIC |---------|-----------|------------|
+-- MAGIC **`CLUSTERING`** | Indexes or partitioning | Liquid Clustering (auto-maintained)
+-- MAGIC **`COMMENT`** | COMMENT ON TABLE / COLUMN | COMMENT on tables/columns
+-- MAGIC **`RETENTION`** | Flashback Data Archive | `delta.deletedFileRetentionDuration`
+-- MAGIC **`CHANGE_TRACKING`** | Materialized view logs or CDC tools | Enable Change Data Feed (CDF)
+-- MAGIC **`GRANTS`** | `GRANT` privileges | `GRANT` privileges
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 9. Schema Validation
+-- MAGIC
+-- MAGIC After conversion, validate that schemas match between source and target. You can use the `information_schema.columns` view in each catalog to learn about the columns.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Validation Checkpoint</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Before proceeding to data migration, ensure:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>All tables have been created in the target catalog/schema</li>
+-- MAGIC                 <li>Column counts match between source and target</li>
+-- MAGIC                 <li>Datatypes are compatible (JSON stored in<code>CLOB/VARCHAR2</code> -> <code>STRING/VARIANT</code>, <code>DATE</code> -> <code>TIMESTAMP</code>)</li>
+-- MAGIC                 <li>Primary key constraints are defined (with <code>RELY</code> if enforced upstream)</li>
+-- MAGIC                 <li>Source tables have CDF enabled for incremental refresh support</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 10. Automated Conversion with Lakebridge
+-- MAGIC
+-- MAGIC Lakebridge can automatically convert some PL/SQL constructs to Databricks SQL. In case of Oracle and Databricks, most data types and functions are similar. On the other hand, orchestration patterns are very different.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Lakebridge Conversion Notes</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Lakebridge automates most conversions but some patterns may require manual review:</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;"><b>Automatically converted:</b></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><code>NUMBER(p,s)</code> -> <code>DECIMAL(p,s)</code></li>
+-- MAGIC                 <li><code>NUMBER(38,0)</code> -> <code>BIGINT</code></li>
+-- MAGIC                 <li><code>VARCHAR2</code> -> <code>STRING</code></li>
+-- MAGIC                 <li><code>SYSDATE</code> -> <code>CURRENT_TIMESTAMP</code></li>
+-- MAGIC                 <li>Removes <code>FROM dual</code> when not required</li>
+-- MAGIC             </ul>
+-- MAGIC                 <p style="margin: 8px 0 0 0; color: #333;"><b>May require manual adjustment:</b></p>
+-- MAGIC             <ul style="margin: 4px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li><code>DATE</code> -> <code>TIMESTAMP</code> - Oracle's DATE type includes both date and time (it's essentially a timestamp with second precision), which is a common silent data loss bug in Oracle mirgations.</li>
+-- MAGIC                 <li><code>ADD_MONTHS(date, n)</code> -> verify interval arithmetic (<code>date ± INTERVAL</code>)</li>
+-- MAGIC                 <li><code>COLLECT()</code> -> <code>COLLECT_LIST()</code> or <code>COLLECT_SET()</code></li>
+-- MAGIC                 <li>Namespace paths (<code>schema.table</code> -> <code>catalog.schema.table</code>) – update manually or use <code>--catalog-name</code></li>
+-- MAGIC                 <li>Stored procedures and packages are not automatically converted</li>
+-- MAGIC             </ul>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">See <a href="https://github.com/databrickslabs/lakebridge" target="_blank">Lakebridge GitHub repository</a> for documentation.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Summary
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### DDL Conversion Checklist
+-- MAGIC ✅ Datatypes mapped according to reference table  
+-- MAGIC ✅ Namespaces updated (`schema.table` -> `catalog.schema.table`)  
+-- MAGIC ✅ `DATE` columns reviewed — Oracle `DATE` includes time, convert to `TIMESTAMP`  
+-- MAGIC ✅ JSON stored in `CLOB` / `VARCHAR2` mapped to `STRING`, `VARIANT`, or `STRUCT`  
+-- MAGIC ✅ Views converted with function syntax adjustments where needed  
+-- MAGIC ✅ Materialized views converted to Materialized Views or Lakeflow pipelines  
+-- MAGIC ✅ Constraints defined (`PRIMARY KEY`, `UNIQUE`, `NOT NULL`)  
+-- MAGIC ✅ Table properties set (`CLUSTER BY`, Change Data Feed)  
+-- MAGIC ✅ `SEQUENCE` objects replaced with `IDENTITY` columns or `UUID()`  
+-- MAGIC ✅ Oracle-specific objects mapped to alternatives  
+-- MAGIC ✅ Schema validation completed  
+-- MAGIC ✅ (OPTIONAL) Use Lakebridge `transpile` for automated conversion
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Key Takeaways
+-- MAGIC
+-- MAGIC **What Converts Directly:**
+-- MAGIC - Standard DDL syntax (`CREATE TABLE`, `CREATE VIEW`)
+-- MAGIC - Most datatypes (`VARCHAR2` -> `STRING`, `NUMBER` -> `DECIMAL` / `BIGINT`)
+-- MAGIC - `NOT NULL` and `CHECK` constraints (enforced on write)
+-- MAGIC - `COMMENT` clauses on tables and columns
+-- MAGIC - `JOIN` syntax (ANSI-compliant)
+-- MAGIC - Functions like `SYSDATE` -> `current_timestamp()`
+-- MAGIC
+-- MAGIC **What Requires Adjustment:**
+-- MAGIC - Namespace paths (`schema.table` -> `catalog.schema.table`)
+-- MAGIC - `DATE` -> `TIMESTAMP` (Oracle `DATE` includes time component — silent data loss risk)
+-- MAGIC - JSON stored in `CLOB` / `VARCHAR2` -> `STRING`, `VARIANT`, or `STRUCT`
+-- MAGIC - Date arithmetic (`ADD_MONTHS`) -> interval syntax
+-- MAGIC - Oracle collection aggregation (`COLLECT`) -> `COLLECT_LIST` or `COLLECT_SET`
+-- MAGIC - `SEQUENCE` -> `IDENTITY` column or `UUID()`
+-- MAGIC - Oracle AI Vector Search (23ai) -> Databricks Vector Search Index + AI Functions
+-- MAGIC - Oracle jobs and schedulers -> Databricks Lakeflow Jobs or Lakeflow SDP Pipelines
+-- MAGIC - Materialized Views require DBSQL Serverless/Pro or Lakeflow SDP Pipelines
+-- MAGIC - Stored procedures and packages require manual conversion
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ## References
+-- MAGIC
+-- MAGIC - [Databricks SQL Language Reference](https://docs.databricks.com/en/sql/language-manual/index.html)
+-- MAGIC - [Delta Lake DDL](https://docs.databricks.com/en/delta/index.html)
+-- MAGIC - [Unity Catalog Data Types](https://docs.databricks.com/en/sql/language-manual/sql-ref-datatypes.html)
+-- MAGIC - [Liquid Clustering](https://docs.databricks.com/en/delta/clustering.html)
+-- MAGIC - [Vector Search](https://docs.databricks.com/en/generative-ai/vector-search.html)
+-- MAGIC - [Lakebridge Documentation](https://databrickslabs.github.io/lakebridge/)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

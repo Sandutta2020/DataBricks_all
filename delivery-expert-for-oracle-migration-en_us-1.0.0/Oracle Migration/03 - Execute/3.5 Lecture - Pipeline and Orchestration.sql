@@ -1,0 +1,1131 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">03 - Execute</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">ℹ️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #0d47a1; font-size: 1.1em;">Already Using External Orchestration Tools?</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">If the client already uses enterprise schedulers like <b>Control-M</b>, <b>Autosys</b>, <b>Tidal</b>, or open-source tools like <b>Apache Airflow</b>, <b>dbt</b>, or <b>Dagster</b>, the fastest migration path is to simply reconfigure these tools to target Databricks instead of Oracle. Update calls to target Databricks REST API, adapt SQL dialects where needed, and your existing job definitions and workflows continue to work.</p>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">This notebook focuses on migrating <b>Oracle-native orchestration</b> — specifically <b>DBMS_SCHEDULER</b> jobs and chains, and <b>Oracle Data Integrator (ODI)</b> scenarios and load plans — to Databricks equivalents. This conversion is essential for organizations relying on Oracle's built-in scheduling and workflow capabilities.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC # Pipeline and Orchestration
+-- MAGIC
+-- MAGIC This lesson covers converting Oracle **DBMS_SCHEDULER** jobs and chains, and **ODI Load Plans** to Databricks orchestration patterns using **Lakeflow Jobs**. You will learn how to map scheduling, dependencies, and event-driven execution patterns, then deploy using **Declarative Automation Bundles**.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">📝</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">CDC Concepts</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">CDC patterns using Oracle were covered in 3.3 - Incremental Sync and CDC. This lesson focuses on <em>orchestration</em> — scheduling and workflow management — rather than the CDC mechanics themselves.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Understand the key differences between Oracle and Databricks orchestration concepts
+-- MAGIC - Convert Oracle DBMS_SCHEDULER jobs and chains to Lakeflow Job tasks with schedules and dependencies
+-- MAGIC - Map ODI Load Plans to Lakeflow Jobs with task dependencies
+-- MAGIC - Handle Oracle event-based scheduling patterns (DCN, AQ) using appropriate Databricks triggers
+-- MAGIC - Deploy jobs and pipelines using Declarative Automation Bundles
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 1. Understanding the Orchestration Landscape
+-- MAGIC
+-- MAGIC Before mapping concepts, it's important to understand what Oracle's native orchestration tools actually do. Oracle provides two primary built-in mechanisms: **DBMS_SCHEDULER** (the database scheduler) and **Oracle Data Integrator (ODI)** for ETL orchestration. Many Oracle shops also use external enterprise schedulers like **Control-M** or **Autosys**, but this lesson focuses on migrating the Oracle-native components.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | What It Does |
+-- MAGIC |-----------|------------|--------------|
+-- MAGIC | `DBMS_SCHEDULER.CREATE_JOB` | Lakeflow Job Task | Schedules execution of PL/SQL, stored procedures, or executables |
+-- MAGIC | `DBMS_SCHEDULER.CREATE_CHAIN` | Lakeflow Job | Workflow container; chain steps with dependency rules |
+-- MAGIC | Chain Rules (`DEFINE_CHAIN_RULE`) | `depends_on` in job tasks | Defines execution order and conditions between steps |
+-- MAGIC | `repeat_interval` (Calendar syntax) | `quartz_cron_expression` (6 fields, includes seconds) | Time-based scheduling |
+-- MAGIC | Database Change Notification (DCN) | File arrival trigger *or* continuous Pipeline | Event trigger when table data changes |
+-- MAGIC | Oracle CDC / GoldenGate / LogMiner | Change Data Feed / Auto Loader | Captures row-level change data |
+-- MAGIC | Database Instance / RAC | Job Cluster / SQL Warehouse | Compute binding for job execution |
+-- MAGIC | `max_runs` / `max_failures` | `max_concurrent_runs` / `max_retries` | Controls concurrent runs and failure handling |
+-- MAGIC | PL/SQL Stored Procedure | Notebook / Python Script / SQL File | Business logic container |
+-- MAGIC | `DBA_SCHEDULER_JOB_RUN_DETAILS` | `system.lakeflow.job_run_timeline` | Monitoring and run history |
+-- MAGIC | ODI Load Plan | Lakeflow Job with task dependencies | Multi-step ETL orchestration with parallelism |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Key Clarification: Oracle CDC ≠ Oracle Scheduling</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Oracle has multiple technologies that are often confused: <b>Oracle Streams</b> (deprecated, replaced by GoldenGate) is a replication technology. <b>Oracle CDC</b> (using LogMiner or GoldenGate) captures <i>what changed</i> in a table. <b>DBMS_SCHEDULER</b> handles <i>when to run</i> jobs. These are separate concerns. In Databricks, CDC maps to <code>AUTO CDC INTO</code>, while scheduling maps to <b>Lakeflow Jobs</b>. Event-driven execution (e.g., Oracle's <code>DBMS_SCHEDULER</code> event-based jobs using Advanced Queuing) maps to <b>file arrival triggers</b> or <b>continuous pipelines</b>.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 2. Pattern Mapping
+-- MAGIC
+-- MAGIC The conversion approach depends on the Oracle pattern being used:
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart TB
+-- MAGIC     subgraph OR["Oracle Pattern"]
+-- MAGIC         T1["DBMS_SCHEDULER Job<br/>(repeat_interval)"]
+-- MAGIC         T2["Event-Based Job<br/>(AQ / DCN trigger)"]
+-- MAGIC         T3["DBMS_SCHEDULER Chain<br/>(step dependencies)"]
+-- MAGIC         T4["ODI Load Plan<br/>(serial/parallel steps)"]
+-- MAGIC     end
+-- MAGIC     subgraph DB["Databricks Equivalent"]
+-- MAGIC         J1["Lakeflow Job<br/>(Scheduled trigger)"]
+-- MAGIC         J2A["Lakeflow Job<br/>(File arrival trigger)"]
+-- MAGIC         J2B["Lakeflow Pipeline<br/>(Continuous)"]
+-- MAGIC         J3["Lakeflow Job<br/>(Task dependencies)"]
+-- MAGIC     end
+-- MAGIC     T1 -->|"Direct conversion"| J1
+-- MAGIC     T2 -->|"Event-driven batch"| J2A
+-- MAGIC     T2 -->|"Near real-time"| J2B
+-- MAGIC     T3 -->|"Direct conversion"| J3
+-- MAGIC     T4 -->|"Direct conversion"| J3
+-- MAGIC     style OR fill:#fff,stroke:#F80102,stroke-width:2px
+-- MAGIC     style DB fill:#fff,stroke:#FF3621,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 3. Extracting Job Definitions from Oracle
+-- MAGIC
+-- MAGIC Start by inventorying your Oracle scheduler jobs and chains. The following queries extract job metadata from the Oracle data dictionary for migration planning.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Extract Scheduler Job Inventory (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- List all scheduler jobs in a schema
+-- MAGIC SELECT job_name, job_type, schedule_type, repeat_interval, 
+-- MAGIC        state, enabled, comments
+-- MAGIC FROM DBA_SCHEDULER_JOBS
+-- MAGIC WHERE owner = 'HR';
+-- MAGIC <br/>
+-- MAGIC -- List all chains (DAG equivalents)
+-- MAGIC SELECT chain_name, rule_set_name, enabled, comments
+-- MAGIC FROM DBA_SCHEDULER_CHAINS
+-- MAGIC WHERE owner = 'HR';
+-- MAGIC <br/>
+-- MAGIC -- Get chain steps and their programs
+-- MAGIC SELECT chain_name, step_name, program_name, step_type
+-- MAGIC FROM DBA_SCHEDULER_CHAIN_STEPS
+-- MAGIC WHERE owner = 'HR';
+-- MAGIC <br/>
+-- MAGIC -- Get chain rules (dependency definitions)
+-- MAGIC SELECT chain_name, rule_name, condition, action, comments
+-- MAGIC FROM DBA_SCHEDULER_CHAIN_RULES
+-- MAGIC WHERE owner = 'HR';
+-- MAGIC <br/>
+-- MAGIC -- Job run history for performance baseline (last 30 days)
+-- MAGIC SELECT job_name, status, actual_start_date, run_duration,
+-- MAGIC        cpu_used, error#, additional_info
+-- MAGIC FROM DBA_SCHEDULER_JOB_RUN_DETAILS
+-- MAGIC WHERE owner = 'HR'
+-- MAGIC   AND actual_start_date >= SYSDATE - 30
+-- MAGIC ORDER BY actual_start_date DESC
+-- MAGIC FETCH FIRST 100 ROWS ONLY;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 4. Converting Scheduled Jobs
+-- MAGIC
+-- MAGIC A basic Oracle DBMS_SCHEDULER job with a calendar-based `repeat_interval` converts directly to a Lakeflow Job with a scheduled trigger.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### Oracle Source
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: DBMS_SCHEDULER Job Example</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Oracle scheduled job using DBMS_SCHEDULER
+-- MAGIC BEGIN
+-- MAGIC     DBMS_SCHEDULER.CREATE_JOB(
+-- MAGIC         job_name        => 'HR.DEPT_HEADCOUNT_JOB',
+-- MAGIC         job_type        => 'STORED_PROCEDURE',
+-- MAGIC         job_action      => 'HR.DEPT_HEADCOUNT_UPDATE_SP',
+-- MAGIC         repeat_interval => 'FREQ=DAILY;BYHOUR=6;BYMINUTE=0;BYSECOND=0',
+-- MAGIC         start_date      => SYSTIMESTAMP,
+-- MAGIC         time_zone       => 'America/Los_Angeles',
+-- MAGIC         comments        => 'Refreshes department headcount metrics daily at 6 AM PT',
+-- MAGIC         enabled         => TRUE
+-- MAGIC     );
+-- MAGIC END;
+-- MAGIC /
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Declarative Automation Bundle Definition
+-- MAGIC
+-- MAGIC Define the equivalent Lakeflow Job in `databricks.yml`:
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 databricks.yml: Scheduled Job</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC bundle:
+-- MAGIC   name: hr-analytics-pipelines
+-- MAGIC
+-- MAGIC resources:
+-- MAGIC   jobs:
+-- MAGIC     dept_headcount:
+-- MAGIC       name: "dept_headcount"
+-- MAGIC       description: "Migrated from Oracle DBMS_SCHEDULER job HR.DEPT_HEADCOUNT_JOB"
+-- MAGIC
+-- MAGIC       email_notifications:
+-- MAGIC         on_failure:
+-- MAGIC           - someone@example.com      
+-- MAGIC
+-- MAGIC       schedule:
+-- MAGIC         quartz_cron_expression: "0 0 6 * * ?"  # Note: Quartz uses 6 fields (includes seconds)
+-- MAGIC         timezone_id: "America/Los_Angeles"
+-- MAGIC         pause_status: UNPAUSED
+-- MAGIC       
+-- MAGIC       tasks:
+-- MAGIC         # uses serverless compute (no cluster definition)
+-- MAGIC         - task_key: "refresh_dept_headcount"
+-- MAGIC           notebook_task:
+-- MAGIC             notebook_path: "src/notebooks/dept_headcount_update"
+-- MAGIC
+-- MAGIC           max_retries: 2
+-- MAGIC           min_retry_interval_millis: 60000
+-- MAGIC
+-- MAGIC targets:
+-- MAGIC   dev:
+-- MAGIC     workspace:
+-- MAGIC       host: ${var.databricks_host}
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'yaml';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | Notes |
+-- MAGIC |-----------|------------|-------|
+-- MAGIC | `FREQ=DAILY;BYHOUR=6` | `quartz_cron_expression: "0 0 6 * * ?"` | Calendar syntax to Quartz; `?` for day-of-week |
+-- MAGIC | Database Instance / RAC | use Serverless or specify `new_cluster` or `existing_cluster_id`  | Serverless compute is recommended for best price-performance |
+-- MAGIC | `enabled => TRUE / FALSE` | `pause_status` | `PAUSED` or `UNPAUSED` |
+-- MAGIC | `max_failures` | `max_retries` | Retry count on failure |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 5. Converting Job Chains (Dependencies)
+-- MAGIC
+-- MAGIC Oracle DBMS_SCHEDULER Chains define multi-step workflows with dependency rules. These convert to Lakeflow Job task dependencies using `depends_on`.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: DBMS_SCHEDULER Chain with Dependencies</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Create programs for each step
+-- MAGIC BEGIN
+-- MAGIC     DBMS_SCHEDULER.CREATE_PROGRAM(
+-- MAGIC         program_name   => 'EMPLOYEES_SYNC_PROG',
+-- MAGIC         program_type   => 'STORED_PROCEDURE',
+-- MAGIC         program_action => 'HR.EMPLOYEES_SYNC_SP',
+-- MAGIC         enabled        => TRUE
+-- MAGIC     );
+-- MAGIC
+-- MAGIC     DBMS_SCHEDULER.CREATE_PROGRAM(
+-- MAGIC         program_name   => 'DEPT_HEADCOUNT_PROG',
+-- MAGIC         program_type   => 'STORED_PROCEDURE',
+-- MAGIC         program_action => 'HR.DEPT_HEADCOUNT_UPDATE_SP',
+-- MAGIC         enabled        => TRUE
+-- MAGIC     );
+-- MAGIC END;
+-- MAGIC /
+-- MAGIC <br/>
+-- MAGIC -- Create chain (DAG equivalent)
+-- MAGIC BEGIN
+-- MAGIC     DBMS_SCHEDULER.CREATE_CHAIN(
+-- MAGIC         chain_name => 'HR_ANALYTICS_CHAIN',
+-- MAGIC         comments   => 'HR analytics pipeline with dependencies'
+-- MAGIC     );
+-- MAGIC
+-- MAGIC     -- Define chain steps
+-- MAGIC     DBMS_SCHEDULER.DEFINE_CHAIN_STEP(
+-- MAGIC         chain_name   => 'HR_ANALYTICS_CHAIN',
+-- MAGIC         step_name    => 'STEP_EMPLOYEES_SYNC',
+-- MAGIC         program_name => 'EMPLOYEES_SYNC_PROG'
+-- MAGIC     );
+-- MAGIC
+-- MAGIC     DBMS_SCHEDULER.DEFINE_CHAIN_STEP(
+-- MAGIC         chain_name   => 'HR_ANALYTICS_CHAIN',
+-- MAGIC         step_name    => 'STEP_DEPT_HEADCOUNT',
+-- MAGIC         program_name => 'DEPT_HEADCOUNT_PROG'
+-- MAGIC     );
+-- MAGIC
+-- MAGIC     -- Define rules (dependencies)
+-- MAGIC     DBMS_SCHEDULER.DEFINE_CHAIN_RULE(
+-- MAGIC         chain_name => 'HR_ANALYTICS_CHAIN',
+-- MAGIC         condition  => 'TRUE',
+-- MAGIC         action     => 'START STEP_EMPLOYEES_SYNC'
+-- MAGIC     );
+-- MAGIC
+-- MAGIC     DBMS_SCHEDULER.DEFINE_CHAIN_RULE(
+-- MAGIC         chain_name => 'HR_ANALYTICS_CHAIN',
+-- MAGIC         condition  => 'STEP_EMPLOYEES_SYNC COMPLETED',
+-- MAGIC         action     => 'START STEP_DEPT_HEADCOUNT'
+-- MAGIC     );
+-- MAGIC
+-- MAGIC     DBMS_SCHEDULER.DEFINE_CHAIN_RULE(
+-- MAGIC         chain_name => 'HR_ANALYTICS_CHAIN',
+-- MAGIC         condition  => 'STEP_DEPT_HEADCOUNT COMPLETED',
+-- MAGIC         action     => 'END'
+-- MAGIC     );
+-- MAGIC
+-- MAGIC     DBMS_SCHEDULER.ENABLE('HR_ANALYTICS_CHAIN');
+-- MAGIC END;
+-- MAGIC /
+-- MAGIC <br/>
+-- MAGIC -- Schedule the chain as a job
+-- MAGIC BEGIN
+-- MAGIC     DBMS_SCHEDULER.CREATE_JOB(
+-- MAGIC         job_name        => 'HR_ANALYTICS_JOB',
+-- MAGIC         job_type        => 'CHAIN',
+-- MAGIC         job_action      => 'HR_ANALYTICS_CHAIN',
+-- MAGIC         repeat_interval => 'FREQ=MINUTELY;INTERVAL=5',
+-- MAGIC         enabled         => TRUE
+-- MAGIC     );
+-- MAGIC END;
+-- MAGIC /
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Declarative Automation Bundles: Job with Dependencies
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 databricks.yml: Job with Task Dependencies</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC resources:
+-- MAGIC   jobs:
+-- MAGIC     hr_analytics_pipeline:
+-- MAGIC       name: "hr_analytics_pipeline"
+-- MAGIC       description: "Migrated from Oracle DBMS_SCHEDULER chain HR_ANALYTICS_CHAIN"
+-- MAGIC       
+-- MAGIC       # File arrival trigger replaces Oracle event-based scheduling
+-- MAGIC       trigger:
+-- MAGIC         file_arrival:
+-- MAGIC           url: "/Volumes/migration_dev/landing/hr_employees/"
+-- MAGIC           min_time_between_triggers_seconds: 60
+-- MAGIC       
+-- MAGIC       job_clusters:
+-- MAGIC         - job_cluster_key: "pipeline_cluster"
+-- MAGIC           new_cluster:
+-- MAGIC             spark_version: "17.3.x-scala2.12"
+-- MAGIC             node_type_id: "i3.xlarge"
+-- MAGIC             num_workers: 2
+-- MAGIC       
+-- MAGIC       tasks:
+-- MAGIC         # Root task - no dependencies
+-- MAGIC         - task_key: "employees_sync"
+-- MAGIC           notebook_task:
+-- MAGIC             notebook_path: "src/notebooks/employees_sync"
+-- MAGIC           job_cluster_key: "pipeline_cluster"
+-- MAGIC         
+-- MAGIC         # Child task - depends on root
+-- MAGIC         - task_key: "dept_headcount_update"
+-- MAGIC           depends_on:
+-- MAGIC             - task_key: "employees_sync"
+-- MAGIC           notebook_task:
+-- MAGIC             notebook_path: "src/notebooks/dept_headcount_update"
+-- MAGIC           job_cluster_key: "pipeline_cluster"
+-- MAGIC       
+-- MAGIC       max_concurrent_runs: 1
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'yaml';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 6. Handling Event-Based Scheduling Patterns
+-- MAGIC
+-- MAGIC Oracle provides several mechanisms for event-driven execution: **DBMS_SCHEDULER event-based jobs** (triggered by AQ messages), **Database Change Notification (DCN)**, and **Oracle Streams** (deprecated). These patterns trigger processing only when new data arrives. In Databricks, you have two options:
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### Option A: File Arrival Trigger (Batch, Event-Driven)
+-- MAGIC
+-- MAGIC Use when you want batch processing triggered by new file arrivals. This replaces Oracle's event-based `DBMS_SCHEDULER` jobs that react to AQ messages or DCN notifications:
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC trigger:
+-- MAGIC   file_arrival:
+-- MAGIC     url: "/Volumes/catalog/schema/landing_zone/"
+-- MAGIC     min_time_between_triggers_seconds: 60
+-- MAGIC     wait_after_last_change_seconds: 30
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'yaml';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### Option B: Lakeflow Pipeline (Continuous/Streaming)
+-- MAGIC
+-- MAGIC Use when you need near real-time processing. This replaces Oracle's event-driven scheduling.
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 databricks.yml: Lakeflow Pipeline Definition</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC resources:
+-- MAGIC   pipelines:
+-- MAGIC     employees_cdc_pipeline:
+-- MAGIC       name: "employees_cdc_pipeline"
+-- MAGIC       catalog: "migration_dev"
+-- MAGIC       target: "silver"
+-- MAGIC       channel: CURRENT
+-- MAGIC       edition: ADVANCED
+-- MAGIC       
+-- MAGIC       libraries:
+-- MAGIC         - notebook:
+-- MAGIC             path: ./src/pipelines/employees_cdc.py
+-- MAGIC       
+-- MAGIC       continuous: false
+-- MAGIC       development: false
+-- MAGIC       photon: true
+-- MAGIC       
+-- MAGIC       clusters:
+-- MAGIC         - label: "default"
+-- MAGIC           num_workers: 2
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'yaml';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">When to Use Which</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333;">
+-- MAGIC                 <li>Use the File Arrival Trigger when batch processing is acceptable and files land in a known location.</li>
+-- MAGIC                 <li>Use a Lakeflow Pipeline when you need continuously running tasks for near real-time processing.</li>
+-- MAGIC                 <li>Use a Scheduled Job when a fixed schedule is sufficient and there is no need for event-driven execution.</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 7. Deploying with Declarative Automation Bundles
+-- MAGIC
+-- MAGIC Declarative Automation Bundles (DABs) provide a consistent way to deploy jobs, pipelines, and other resources across environments.
+-- MAGIC
+-- MAGIC DABs provide infrastructure-as-code for Databricks resources. This enables version control, automated testing, and environment promotion for migrated pipelines.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph DEV["Development"]
+-- MAGIC         CODE["Code Changes"]
+-- MAGIC         BUNDLE["DAB"]
+-- MAGIC     end
+-- MAGIC     subgraph CI["CI Pipeline"]
+-- MAGIC         VAL["Validate"]
+-- MAGIC         TEST["Test"]
+-- MAGIC         BUILD["Build"]
+-- MAGIC     end
+-- MAGIC     subgraph CD["CD Pipeline"]
+-- MAGIC         STAGING["Deploy to<br/>Staging"]
+-- MAGIC         PROD["Deploy to<br/>Production"]
+-- MAGIC     end
+-- MAGIC     CODE --> BUNDLE --> VAL --> TEST --> BUILD
+-- MAGIC     BUILD --> STAGING --> PROD
+-- MAGIC     style DEV fill:#fff,stroke:#607d8b,stroke-width:2px
+-- MAGIC     style CI fill:#fff,stroke:#1976d2,stroke-width:2px
+-- MAGIC     style CD fill:#fff,stroke:#4caf50,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### Project Structure
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Project Directory Layout</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC my-migration-project/
+-- MAGIC ├── databricks.yml              # Main bundle configuration
+-- MAGIC ├── resources/
+-- MAGIC │   ├── jobs.yml               # Job definitions
+-- MAGIC │   └── pipelines.yml          # Pipeline definitions
+-- MAGIC ├── src/
+-- MAGIC │   ├── notebooks/
+-- MAGIC │   │   ├── employees_sync.py
+-- MAGIC │   │   └── dept_headcount_update.py
+-- MAGIC │   └── pipelines/
+-- MAGIC │       └── employees_cdc.py
+-- MAGIC └── tests/
+-- MAGIC </div>
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### Deployment Commands
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Databricks CLI: Bundle Commands</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC # Validate the bundle
+-- MAGIC databricks bundle validate
+-- MAGIC <br/>
+-- MAGIC # Deploy to development
+-- MAGIC databricks bundle deploy -t dev
+-- MAGIC <br/>
+-- MAGIC # Deploy to production
+-- MAGIC databricks bundle deploy -t prod
+-- MAGIC <br/>
+-- MAGIC # Run a job immediately
+-- MAGIC databricks bundle run dept_headcount -t dev
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC ### GitHub Actions CI/CD Workflow
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 .github/workflows/deploy.yml</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="yaml">
+-- MAGIC name: Deploy Databricks Bundle
+-- MAGIC
+-- MAGIC on:
+-- MAGIC   push:
+-- MAGIC     branches: [main, develop]
+-- MAGIC   pull_request:
+-- MAGIC     branches: [main]
+-- MAGIC
+-- MAGIC jobs:
+-- MAGIC   validate:
+-- MAGIC     runs-on: ubuntu-latest
+-- MAGIC     steps:
+-- MAGIC       - uses: actions/checkout@v4
+-- MAGIC       
+-- MAGIC       - name: Install Databricks CLI
+-- MAGIC         run: |
+-- MAGIC           curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+-- MAGIC       
+-- MAGIC       - name: Validate Bundle
+-- MAGIC         env:
+-- MAGIC           DATABRICKS_HOST: ${{secrets}}
+-- MAGIC           DATABRICKS_TOKEN: ${{secrets}}
+-- MAGIC         run: databricks bundle validate
+-- MAGIC
+-- MAGIC   deploy-staging:
+-- MAGIC     needs: validate
+-- MAGIC     if: github.ref == 'refs/heads/develop'
+-- MAGIC     runs-on: ubuntu-latest
+-- MAGIC     environment: staging
+-- MAGIC     steps:
+-- MAGIC       - uses: actions/checkout@v4
+-- MAGIC       
+-- MAGIC       - name: Install Databricks CLI
+-- MAGIC         run: |
+-- MAGIC           curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+-- MAGIC       
+-- MAGIC       - name: Deploy to Staging
+-- MAGIC         env:
+-- MAGIC           DATABRICKS_HOST: ${{secrets}}
+-- MAGIC           DATABRICKS_TOKEN: ${{secrets}}
+-- MAGIC         run: databricks bundle deploy --target staging
+-- MAGIC
+-- MAGIC   deploy-production:
+-- MAGIC     needs: validate
+-- MAGIC     if: github.ref == 'refs/heads/main'
+-- MAGIC     runs-on: ubuntu-latest
+-- MAGIC     environment: production
+-- MAGIC     steps:
+-- MAGIC       - uses: actions/checkout@v4
+-- MAGIC       
+-- MAGIC       - name: Install Databricks CLI
+-- MAGIC         run: |
+-- MAGIC           curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+-- MAGIC       
+-- MAGIC       - name: Deploy to Production
+-- MAGIC         env:
+-- MAGIC           DATABRICKS_HOST: ${{secrets}}
+-- MAGIC           DATABRICKS_TOKEN: ${{secrets}}
+-- MAGIC         run: databricks bundle deploy --target prod
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'bash';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 8. Monitoring and Observability
+-- MAGIC
+-- MAGIC After migration, establish monitoring to ensure pipelines meet SLAs. Databricks provides built-in observability through Job Runs, System Tables, and integration with external monitoring tools.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Validation Checkpoint</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Before decommissioning Oracle DBMS_SCHEDULER jobs and ODI load plans, ensure:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>All Lakeflow Jobs are running successfully for at least one full cycle</li>
+-- MAGIC                 <li>Data quality checks pass on migrated tables</li>
+-- MAGIC                 <li>Job durations are within acceptable SLA thresholds</li>
+-- MAGIC                 <li>Verify alerting and notifications are configured</li>
+-- MAGIC                 <li>Runbooks are updated with Databricks-specific troubleshooting steps</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Summary
+-- MAGIC
+-- MAGIC This lesson covered converting Oracle DBMS_SCHEDULER jobs and chains, and ODI load plans to Lakeflow Jobs deployed via Declarative Automation Bundles.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ### Quick Reference: Conversion Mapping
+-- MAGIC
+-- MAGIC | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | Notes |
+-- MAGIC |-----------|------------|-------|
+-- MAGIC | `DBMS_SCHEDULER.CREATE_JOB` with `repeat_interval` | Lakeflow Job with `schedule` | Calendar syntax → Quartz (add seconds field) |
+-- MAGIC | `DBMS_SCHEDULER.CREATE_CHAIN` with `DEFINE_CHAIN_RULE` | `depends_on` in job tasks | Direct mapping of step dependencies |
+-- MAGIC | Event-based jobs (AQ / DCN triggers) | File arrival trigger OR Pipeline | Choose based on latency needs |
+-- MAGIC | Database Instance / RAC | Job cluster or SQL warehouse | Serverless for best price-performance |
+-- MAGIC | PL/SQL Stored Procedure | Notebook or Python script | Convert PL/SQL to PySpark or Databricks SQL |
+-- MAGIC | `DBA_SCHEDULER_JOB_RUN_DETAILS` | System tables + Job Runs UI | `system.lakeflow.job_run_timeline` |
+-- MAGIC | ODI Load Plan | Lakeflow Job with task graph | Map serial/parallel steps to `depends_on` |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ### Conversion Checklist
+-- MAGIC
+-- MAGIC ✅ Job inventory extracted from Oracle data dictionary (`DBA_SCHEDULER_JOBS`, `DBA_SCHEDULER_CHAINS`)  
+-- MAGIC ✅ Schedules converted from Oracle calendar syntax to Quartz CRON expressions  
+-- MAGIC ✅ Chain step dependencies mapped to `depends_on`  
+-- MAGIC ✅ Event-based patterns (DCN / AQ triggers) evaluated for trigger type  
+-- MAGIC ✅ External orchestrators (Control-M, Autosys, Airflow, dbt) updated to target Databricks  
+-- MAGIC ✅ ODI Load Plans restructured as Lakeflow Jobs with task dependencies  
+-- MAGIC ✅ DAB created with environment targets  
+-- MAGIC ✅ Jobs validated in parallel with Oracle scheduler jobs  
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ## References
+-- MAGIC
+-- MAGIC - [Lakeflow Jobs Documentation](https://docs.databricks.com/en/jobs/index.html)
+-- MAGIC - [Lakeflow Spark Declarative Pipelines](https://docs.databricks.com/aws/en/ldp)
+-- MAGIC - [Declarative Automation Bundles](https://docs.databricks.com/en/dev-tools/bundles/index.html)
+-- MAGIC - [File Arrival Triggers](https://docs.databricks.com/en/jobs/file-arrival-triggers.html)
+-- MAGIC - [System Tables for Observability](https://docs.databricks.com/en/admin/system-tables/index.html)
+-- MAGIC - [Oracle DBMS_SCHEDULER Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_SCHEDULER.html)
+-- MAGIC - [Oracle Scheduler Concepts](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/oracle-scheduler-concepts.html)
+-- MAGIC - [Oracle Data Integrator (ODI) Documentation](https://docs.oracle.com/en/middleware/fusion-middleware/data-integrator/)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

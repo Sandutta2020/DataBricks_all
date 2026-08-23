@@ -1,0 +1,1878 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">05 - Enable</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="
+-- MAGIC   border-left: 4px solid #1976d2;
+-- MAGIC   background: #e3f2fd;
+-- MAGIC   padding: 14px 18px;
+-- MAGIC   border-radius: 4px;
+-- MAGIC   margin: 16px 0;
+-- MAGIC ">
+-- MAGIC   <strong style="display:block; color:#0d47a1; margin-bottom:6px; font-size: 1.1em;">
+-- MAGIC     Complete this Notebook in the Databricks Academy Provided Workspace
+-- MAGIC   </strong>
+-- MAGIC   <div style="color:#333;">
+-- MAGIC This notebook is designed to run in a Databricks Academy provided Vocareum workspace.
+-- MAGIC
+-- MAGIC Work through the notebook in sequence. Skipping steps may cause later sections to fail.
+-- MAGIC   </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Lab: Enablement & Automation Phase
+-- MAGIC
+-- MAGIC This hands-on lab tests your understanding of the Enablement & Automation phase. You will complete quizzes to reinforce key concepts and execute SQL commands to implement security controls on your migrated data.
+-- MAGIC
+-- MAGIC **Lab Format:** Interactive quizzes + SQL code exercises
+-- MAGIC
+-- MAGIC **Topics Covered:**
+-- MAGIC - Platform Operations and Cost Management: Cost model mapping, billing system tables, optimization strategies
+-- MAGIC - Security and Fine-Grained Access: Row filters, column masks, ABAC patterns
+-- MAGIC - Consumer Integration: Query monitoring, AI/BI capabilities
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Lab Setup (run this first)
+-- MAGIC
+-- MAGIC Run the following cell to create your unique lab catalog name. This variable will be used throughout the lab exercises to ensure each learner has their own isolated environment. A schema and a volume will be created, too.
+-- MAGIC
+-- MAGIC **Important:** You must run this cell before proceeding with any other exercises. 
+-- MAGIC
+-- MAGIC This lab uses the Oracle HR sample dataset. For the complete license, see `assets/data/LICENSE.txt`.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Compute Requirements
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC   <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC     <span style="font-size: 24px;">🚨</span>
+-- MAGIC     <div>
+-- MAGIC       <strong style="color: #1565c0; font-size: 1.1em;">REQUIRED – SQL WAREHOUSE OR SERVERLESS COMPUTE</strong>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;">This notebook runs on both <strong>SQL Warehouse</strong> and <strong>Serverless compute</strong>. Select your preferred compute resource before executing any cells.</p>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;"><strong>Testing configuration:</strong> This demo was tested using SQL Warehouse</strong> and Serverless compute <strong>version 4</strong>. For more details on Serverless versions, see the <a href="https://docs.databricks.com/aws/en/compute/serverless/dependencies" style="color: #1565c0; text-decoration: none; font-weight: 500;">Databricks documentation</a>.</p>
+-- MAGIC     </div>
+-- MAGIC   </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Lab Setup (Python)
+-- MAGIC %run ../Includes/Classroom-Setup-Lab-5
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Platform Operations and Cost Management
+-- MAGIC
+-- MAGIC In this section, you learned about cost management architecture, mapping Oracle credits to Databricks DBUs, implementing tagging strategies, and configuring budget controls.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Exercise 1: Understanding the Cost Model
+-- MAGIC
+-- MAGIC Match each Oracle cost concept on the left to its Databricks equivalent on the right.
+-- MAGIC
+-- MAGIC <div id="costModelMatchRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var concepts = [
+-- MAGIC         ["CPU/Named-User Plus license fees", "DBUs (Databricks Units)", "Base consumption unit for compute"],
+-- MAGIC         ["Oracle EE/SE2 per-processor pricing", "Warehouse size + SKU type", "Compute sizing with different DBU rates"],
+-- MAGIC         ["Annual support (22% of license cost)", "Per-second billing", "Oracle support is fixed; Databricks scales with use"],
+-- MAGIC         ["Always-on instance (no auto-suspend)", "Auto-stop", "Oracle databases run continuously; Databricks warehouses idle-off"],
+-- MAGIC         ["Oracle RAC (Real Application Clusters)", "Auto-scaling clusters", "Both provide horizontal compute scaling"],
+-- MAGIC         ["Database Resource Manager (DBRM)", "Budgets + Alerts", "Resource governance and cost control mechanisms"]
+-- MAGIC     ];
+-- MAGIC     function shuffle(a){var b=a.slice();for(var i=b.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=b[i];b[i]=b[j];b[j]=t;}return b;}
+-- MAGIC     var right=shuffle(concepts.map(function(c){return c[1];}));
+-- MAGIC     var matched={};var selected=null;
+-- MAGIC     function render(){
+-- MAGIC         var root=document.getElementById("costModelMatchRoot");root.innerHTML="";
+-- MAGIC         var w=document.createElement("div");w.style.cssText="display:flex;gap:24px;margin:16px 0;";
+-- MAGIC         var lc=document.createElement("div");lc.style.cssText="flex:1;display:flex;flex-direction:column;gap:8px;";
+-- MAGIC         var rc=document.createElement("div");rc.style.cssText="flex:1;display:flex;flex-direction:column;gap:8px;";
+-- MAGIC         concepts.forEach(function(item,i){
+-- MAGIC             var b=document.createElement("button");
+-- MAGIC             b.textContent=item[0];b.style.cssText="padding:10px;border:2px solid #1976d2;border-radius:6px;background:"+(selected===i?"#bbdefb":"#e3f2fd")+";cursor:pointer;text-align:left;font-size:13px;";
+-- MAGIC             b.onclick=function(){selected=i;render();};lc.appendChild(b);
+-- MAGIC         });
+-- MAGIC         right.forEach(function(item,ri){
+-- MAGIC             var isM=Object.values(matched).includes(ri);
+-- MAGIC             var cL=concepts.findIndex(function(c){return c[1]===item;});
+-- MAGIC             var isC=matched[cL]===ri;
+-- MAGIC             var b=document.createElement("button");
+-- MAGIC             b.textContent=item;b.style.cssText="padding:10px;border:2px solid "+(isM?(isC?"#4caf50":"#f44336"):"#757575")+";border-radius:6px;background:"+(isM?(isC?"#e8f5e9":"#ffebee"):"#f5f5f5")+";cursor:pointer;text-align:left;font-size:13px;";
+-- MAGIC             b.onclick=function(){if(selected!==null){matched[selected]=ri;selected=null;render();}};rc.appendChild(b);
+-- MAGIC         });
+-- MAGIC         w.appendChild(lc);w.appendChild(rc);root.appendChild(w);
+-- MAGIC         var cc=Object.keys(matched).filter(function(k){return concepts[k]&&concepts[k][1]===right[matched[k]];}).length;
+-- MAGIC         var m=document.createElement("p");
+-- MAGIC         m.textContent=Object.keys(matched).length>0?cc+"/"+concepts.length+" correct":"Click an Oracle concept, then its Databricks match.";
+-- MAGIC         m.style.color=cc===concepts.length?"#2e7d32":"#555";root.appendChild(m);
+-- MAGIC     }
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Exercise 2: Oracle CPU and Cost Extraction Query
+-- MAGIC
+-- MAGIC Complete the Oracle query to extract monthly CPU usage by schema and application module — the equivalent of warehouse metering history. Fill in the correct **Oracle functions** and **system view name**.
+-- MAGIC
+-- MAGIC <div id="fillBlankEx2Root"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "fn_nvl", label: "null-handling function", options: ["NVL", "COALESCE", "ISNULL", "IFNULL"], correct: "NVL" },
+-- MAGIC         { id: "fn_trunc", label: "date truncation", options: ["TRUNC", "DATE_TRUNC", "FLOOR", "ROUND"], correct: "TRUNC" },
+-- MAGIC         { id: "view", label: "Oracle AWR view", options: ["DBA_HIST_SQLSTAT", "V$SQL", "ALL_SQLTEXT", "DBA_AUDIT_TRAIL"], correct: "DBA_HIST_SQLSTAT" },
+-- MAGIC         { id: "fn_add", label: "date arithmetic", options: ["ADD_MONTHS", "DATEADD", "INTERVAL", "DATE_ADD"], correct: "ADD_MONTHS" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdown(d) {
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: #dcdcaa; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">\u2192 ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdownTable(d) {
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: #ce9178; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">\u2192 ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('fillBlankEx2Root');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">\ud83d\udcdd Complete the Query: Oracle CPU &amp; Cost Extraction</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;s.parsing_schema_name <span style="color: #569cd6;">AS</span> schema_name,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[0]) + '<span style="color: #d4d4d4;">(s.module, </span><span style="color: #ce9178;">\'untagged\'</span><span style="color: #d4d4d4;">) </span><span style="color: #569cd6;">AS</span> application_module,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[1]) + '<span style="color: #d4d4d4;">(s.last_active_time, </span><span style="color: #ce9178;">\'MM\'</span><span style="color: #d4d4d4;">) </span><span style="color: #569cd6;">AS</span> usage_month,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #dcdcaa;">ROUND</span>(<span style="color: #dcdcaa;">SUM</span>(s.cpu_time_delta) / <span style="color: #b5cea8;">1e6</span>, <span style="color: #b5cea8;">2</span>) <span style="color: #569cd6;">AS</span> total_cpu_sec<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span> ' + makeDropdownTable(dropdowns[2]) + '<span style="color: #d4d4d4;"> s</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">WHERE</span> s.last_active_time >= ' + makeDropdown(dropdowns[3]) + '<span style="color: #d4d4d4;">(</span><span style="color: #dcdcaa;">SYSDATE</span><span style="color: #d4d4d4;">, </span><span style="color: #b5cea8;">-6</span><span style="color: #d4d4d4;">)</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">GROUP BY</span> s.parsing_schema_name, <span style="color: #dcdcaa;">NVL</span>(s.module, <span style="color: #ce9178;">\'untagged\'</span>), <span style="color: #dcdcaa;">TRUNC</span>(s.last_active_time, <span style="color: #ce9178;">\'MM\'</span>)<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span> usage_month <span style="color: #569cd6;">DESC</span>, total_cpu_sec <span style="color: #569cd6;">DESC</span>;';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">\u2713 Correct!</strong> This query uses <code>DBA_HIST_SQLSTAT</code> (the AWR historical SQL stats view) with Oracle-specific functions: <code>NVL</code> for null handling, <code>TRUNC</code> for date truncation, and <code>ADD_MONTHS</code> for date arithmetic.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> Remember: Oracle uses <code>NVL</code> (not COALESCE/ISNULL), <code>TRUNC</code> for dates (not DATE_TRUNC), <code>ADD_MONTHS</code> for month arithmetic, and <code>DBA_HIST_SQLSTAT</code> is the AWR view for historical SQL statistics.';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkEx2Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetEx2Btn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">\u21bb Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         var checkBtn = document.getElementById('checkEx2Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetEx2Btn');
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Exercise 3: Query Databricks Billing Usage by Tags
+-- MAGIC
+-- MAGIC Write a SQL query against the Databricks system tables to analyze DBU consumption by custom tags. Your query should:
+-- MAGIC
+-- MAGIC 1. Extract `team`, `project`, and `environment` from the `custom_tags` map
+-- MAGIC 2. Get the `sku_name` to identify the compute type
+-- MAGIC 3. Truncate usage to monthly granularity
+-- MAGIC 4. Calculate total DBUs and active days per grouping
+-- MAGIC 5. Filter to last 90 days and only records with tags
+-- MAGIC 6. Order by month (descending) and total DBUs (descending)
+-- MAGIC
+-- MAGIC **Hints:**
+-- MAGIC - Custom tags are stored as a MAP type: `custom_tags['key_name']`
+-- MAGIC - The billing table is at `system.billing.usage`
+-- MAGIC - Use `DATE_TRUNC('month', usage_start_time)` for monthly aggregation
+-- MAGIC - Use `GROUP BY ALL` to group by all non-aggregated columns
+-- MAGIC
+-- MAGIC **Note:** due to environment limitations, run the query against a synthetic usage table. It is called `system_billing_usage` and can be found in the current schema.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Query Usage by Tags (SQL)
+-- Exercise 3: Query Billing Usage by Tags (SQL)
+-- Replace <FILL_IN> placeholders with the correct code
+
+SELECT 
+    <FILL_IN>['team'] AS team,
+    <FILL_IN>['project'] AS project,
+    <FILL_IN>['environment'] AS environment,
+    sku_name,
+    <FILL_IN>('month', usage_start_time) AS usage_month,
+    SUM(<FILL_IN>) AS total_dbus,
+    COUNT(DISTINCT <FILL_IN>) AS active_days
+FROM system_billing_usage
+WHERE usage_start_time >= CURRENT_DATE - INTERVAL 90 DAYS
+  AND custom_tags IS NOT NULL
+GROUP BY ALL
+ORDER BY usage_month DESC, total_dbus DESC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">📖 Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC SELECT 
+-- MAGIC     custom_tags['team'] AS team,
+-- MAGIC     custom_tags['project'] AS project,
+-- MAGIC     custom_tags['environment'] AS environment,
+-- MAGIC     sku_name,
+-- MAGIC     DATE_TRUNC('month', usage_start_time) AS usage_month,
+-- MAGIC     SUM(usage_quantity) AS total_dbus,
+-- MAGIC     COUNT(DISTINCT usage_date) AS active_days
+-- MAGIC FROM system_billing_usage
+-- MAGIC WHERE usage_start_time >= CURRENT_DATE - INTERVAL 90 DAYS
+-- MAGIC   AND custom_tags IS NOT NULL
+-- MAGIC GROUP BY ALL
+-- MAGIC ORDER BY usage_month DESC, total_dbus DESC
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px; padding: 12px 16px; background: #fff8e1; border-left: 4px solid #ff9800; border-radius: 4px;">
+-- MAGIC <strong>Key Points:</strong>
+-- MAGIC <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+-- MAGIC <li><code>custom_tags</code> is a MAP column - access values with bracket notation</li>
+-- MAGIC <li><code>system.billing.usage</code> is the system table for billing data</li>
+-- MAGIC <li><code>usage_quantity</code> contains the DBU count</li>
+-- MAGIC <li><code>usage_date</code> is the date column for counting active days</li>
+-- MAGIC <li><code>GROUP BY ALL</code> groups by all non-aggregated SELECT columns</li>
+-- MAGIC </ul>
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Exercise 4: Cost Optimization Quick Wins
+-- MAGIC
+-- MAGIC Sort each optimization strategy into the correct category: **Quick Win** (easy to implement, immediate savings) or **Not a Quick Win** (requires planning, architecture changes, or ongoing effort).
+-- MAGIC
+-- MAGIC <div id="costQuickWinRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var items = [
+-- MAGIC         { id: "auto_stop", label: "Aggressive auto-stop (5-10 min for dev/test)", correct: "quickwin" },
+-- MAGIC         { id: "serverless", label: "Use Serverless for variable workloads", correct: "quickwin" },
+-- MAGIC         { id: "photon", label: "Enable Photon acceleration for SQL workloads", correct: "quickwin" },
+-- MAGIC         { id: "pred_opt", label: "Enable Predictive Optimization at schema level", correct: "quickwin" },
+-- MAGIC         { id: "right_size", label: "Right-size warehouses based on queue time analysis", correct: "notquick" },
+-- MAGIC         { id: "enforce_tags", label: "Enforce tagging via cluster policies", correct: "notquick" },
+-- MAGIC         { id: "liquid_cluster", label: "Replace partitioning with Liquid Clustering", correct: "notquick" },
+-- MAGIC         { id: "spot_instances", label: "Use spot instances for fault-tolerant batch jobs", correct: "notquick" },
+-- MAGIC         { id: "audit_clusters", label: "Monthly audit of personal/interactive clusters", correct: "notquick" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var buckets = {
+-- MAGIC         quickwin: { label: "⚡ Quick Win", color: "#4caf50", items: [] },
+-- MAGIC         notquick: { label: "📋 Not a Quick Win", color: "#ff9800", items: [] }
+-- MAGIC     };
+-- MAGIC     
+-- MAGIC     var unsorted = [];
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         unsorted = shuffleArray(items.slice());
+-- MAGIC         buckets.quickwin.items = [];
+-- MAGIC         buckets.notquick.items = [];
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function getItemById(id) {
+-- MAGIC         for (var i = 0; i < items.length; i++) {
+-- MAGIC             if (items[i].id === id) return items[i];
+-- MAGIC         }
+-- MAGIC         return null;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             buckets[key].items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 if (item && item.correct === key) correct++;
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('costQuickWinRoot');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📂 Sort by Implementation Effort</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === items.length ? '#e8f5e9' : '#fff3e0';
+-- MAGIC             var textColor = score === items.length ? '#2e7d32' : '#e65100';
+-- MAGIC             html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + items.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (unsorted.length > 0) {
+-- MAGIC             html += '<div style="margin-bottom: 20px; padding: 16px; background: #fff; border: 2px dashed #bbb; border-radius: 8px;">';
+-- MAGIC             html += '<div style="font-size: 0.9em; color: #666; margin-bottom: 12px; font-weight: 600;">Strategies to sort:</div>';
+-- MAGIC             html += '<div style="display: flex; flex-wrap: wrap; gap: 10px;">';
+-- MAGIC             unsorted.forEach(function(item) {
+-- MAGIC                 html += '<div class="sort-item-cost" draggable="true" data-id="' + item.id + '" style="padding: 10px 16px; background: #e3f2fd; border: 2px solid #1976d2; border-radius: 6px; cursor: grab; font-size: 0.95em; color: #333;">' + item.label + '</div>';
+-- MAGIC             });
+-- MAGIC             html += '</div></div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 20px;">';
+-- MAGIC         
+-- MAGIC         for (var key in buckets) {
+-- MAGIC             var bucket = buckets[key];
+-- MAGIC             html += '<div class="bucket-cost" data-bucket="' + key + '" style="padding: 16px; background: #fff; border: 2px dashed ' + bucket.color + '; border-radius: 8px; min-height: 200px;">';
+-- MAGIC             html += '<div style="font-weight: 600; font-size: 1.1em; color: ' + bucket.color + '; margin-bottom: 12px; text-align: center; padding-bottom: 8px; border-bottom: 2px solid ' + bucket.color + ';">' + bucket.label + '</div>';
+-- MAGIC             html += '<div class="bucket-items-cost" style="display: flex; flex-direction: column; gap: 8px;">';
+-- MAGIC             
+-- MAGIC             bucket.items.forEach(function(id) {
+-- MAGIC                 var item = getItemById(id);
+-- MAGIC                 var isCorrect = item.correct === key;
+-- MAGIC                 var itemBg = '#fff';
+-- MAGIC                 var itemBorder = bucket.color;
+-- MAGIC                 
+-- MAGIC                 if (showResults) {
+-- MAGIC                     itemBg = isCorrect ? '#e8f5e9' : '#ffebee';
+-- MAGIC                     itemBorder = isCorrect ? '#4caf50' : '#f44336';
+-- MAGIC                 }
+-- MAGIC                 
+-- MAGIC                 html += '<div class="sort-item-cost" draggable="true" data-id="' + id + '" style="padding: 10px 14px; background: ' + itemBg + '; border: 2px solid ' + itemBorder + '; border-radius: 6px; cursor: grab; font-size: 0.9em; color: #333; display: flex; justify-content: space-between; align-items: center;">';
+-- MAGIC                 html += '<span>' + item.label + '</span>';
+-- MAGIC                 if (showResults) {
+-- MAGIC                     html += '<span>' + (isCorrect ? '✓' : '✗') + '</span>';
+-- MAGIC                 }
+-- MAGIC                 html += '</div>';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             html += '</div></div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end;">';
+-- MAGIC         var checkDisabled = unsorted.length > 0 ? ' disabled style="padding: 12px 28px; background: #ccc; color: white; border: none; border-radius: 6px; cursor: not-allowed; font-size: 1em; font-weight: 600;"' : ' style="padding: 12px 28px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;"';
+-- MAGIC         html += '<button id="checkCostBtn"' + checkDisabled + '>Check Answers</button>';
+-- MAGIC         html += '<button id="resetCostSortBtn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sortItems = document.querySelectorAll('.sort-item-cost');
+-- MAGIC         var bucketEls = document.querySelectorAll('.bucket-cost');
+-- MAGIC         var checkBtn = document.getElementById('checkCostBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetCostSortBtn');
+-- MAGIC         var draggedId = null;
+-- MAGIC         
+-- MAGIC         sortItems.forEach(function(item) {
+-- MAGIC             item.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedId = this.dataset.id;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedId = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         bucketEls.forEach(function(bucket) {
+-- MAGIC             bucket.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#f0f7ff';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('dragleave', function() {
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             bucket.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedId) {
+-- MAGIC                     var targetBucket = this.dataset.bucket;
+-- MAGIC                     
+-- MAGIC                     unsorted = unsorted.filter(function(item) { return item.id !== draggedId; });
+-- MAGIC                     
+-- MAGIC                     for (var key in buckets) {
+-- MAGIC                         buckets[key].items = buckets[key].items.filter(function(id) { return id !== draggedId; });
+-- MAGIC                     }
+-- MAGIC                     
+-- MAGIC                     buckets[targetBucket].items.push(draggedId);
+-- MAGIC                     showResults = false;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         checkBtn.addEventListener('click', function() {
+-- MAGIC             if (unsorted.length === 0) {
+-- MAGIC                 showResults = true;
+-- MAGIC                 render();
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             init();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Security and Fine-Grained Access
+-- MAGIC
+-- MAGIC In this section, you learned about implementing row-level security with row filters, column masking for sensitive data, and attribute-based access control (ABAC) patterns in Unity Catalog.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Exercise 5: Extract Oracle Row Access Policies
+-- MAGIC
+-- MAGIC Complete the Oracle query to extract VPD row access policy definitions. Fill in the correct Oracle **system view name** and **column names** — these are the DBA views you query to inventory existing security policies before migrating them to Unity Catalog row filters.
+-- MAGIC
+-- MAGIC <div id="fillBlankEx5Root"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "col1",  label: "function owner column",    options: ["pf_owner", "grantee", "owner", "created_by"], correct: "pf_owner" },
+-- MAGIC         { id: "col2",  label: "policy function column",   options: ["function", "policy_body", "trigger_body", "policy_name"], correct: "function" },
+-- MAGIC         { id: "view1", label: "Oracle VPD policy view",   options: ["DBA_POLICIES", "ALL_OBJECTS", "DBA_AUDIT_TRAIL", "DBA_TAB_PRIVS"], correct: "DBA_POLICIES" },
+-- MAGIC         { id: "view2", label: "Oracle policy groups view", options: ["DBA_POLICY_GROUPS", "DBA_ROLES", "V$SESSION_PRIVS", "DBA_SYS_PRIVS"], correct: "DBA_POLICY_GROUPS" }
+-- MAGIC     ];
+-- MAGIC
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function makeDropdown(d) {
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: #dcdcaa; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function makeDropdownTable(d) {
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: #ce9178; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('fillBlankEx5Root');
+-- MAGIC         var html = '';
+-- MAGIC
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: Extract Oracle Row Access Policies</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC
+-- MAGIC         html += '<span style="color: #6a9955;">-- List all VPD policies (run in Oracle)</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span><span style="color: #d4d4d4;"> object_owner, object_name, policy_name,</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[0]) + '<span style="color: #569cd6;"> AS</span><span style="color: #d4d4d4;"> function_owner, </span>' + makeDropdown(dropdowns[1]) + '<span style="color: #569cd6;"> AS</span><span style="color: #d4d4d4;"> policy_function,</span><br/>';
+-- MAGIC         html += '<span style="color: #d4d4d4;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;policy_type, enable </span><span style="color: #569cd6;">AS</span><span style="color: #d4d4d4;"> is_enabled</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span><span style="color: #d4d4d4;"> </span>' + makeDropdownTable(dropdowns[2]) + '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span><span style="color: #d4d4d4;"> object_owner, object_name, policy_name;</span><br/>';
+-- MAGIC         html += '<br/>';
+-- MAGIC         html += '<span style="color: #6a9955;">-- List all policy groups</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span><span style="color: #d4d4d4;"> object_owner, object_name, policy_group, policy_name</span><br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span><span style="color: #d4d4d4;"> </span>' + makeDropdownTable(dropdowns[3]) + '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span><span style="color: #d4d4d4;"> object_owner, object_name;</span>';
+-- MAGIC
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> <code>DBA_POLICIES</code> and <code>DBA_POLICY_GROUPS</code> are the Oracle system views for inventorying VPD policies. The <code>pf_owner</code> and <code>function</code> columns identify the PL/SQL functions implementing each policy.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> Use <code>DBA_POLICIES</code> to list VPD row access policies and <code>DBA_POLICY_GROUPS</code> for policy groups. The <code>pf_owner</code> and <code>function</code> columns specify the PL/SQL function owner and name.';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkEx5Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetEx5Btn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         html += '</div>';
+-- MAGIC
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC
+-- MAGIC         var checkBtn = document.getElementById('checkEx5Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetEx5Btn');
+-- MAGIC
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Exercise 6: Implement Row Filtering
+-- MAGIC
+-- MAGIC Implement a row filter function that restricts location data by region based on user group membership. The Oracle HR database has office locations in multiple countries, and different regional HR teams should only see data from their assigned regions.
+-- MAGIC
+-- MAGIC **Business Rules:**
+-- MAGIC - `data_admins` group: See all locations
+-- MAGIC - `hr_apac` group: See IN, AU, SG, JP, CN
+-- MAGIC - `hr_emea` group: See UK, DE, FR, IT, CH, NL
+-- MAGIC - `hr_amer` group: See US, CA, MX, BR
+-- MAGIC - Default (all other users): See US only
+-- MAGIC
+-- MAGIC **Your tasks:**
+-- MAGIC 1. Create a UDF that returns TRUE/FALSE based on group membership and `country_id`
+-- MAGIC 2. Apply the row filter to the `locations` table
+-- MAGIC 3. Verify the filter works by querying the table
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Create Row Filter Function (SQL)
+-- Exercise 6, Step 1: Create the Row Filter Function (SQL)
+
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Apply Row Filter (SQL)
+-- Exercise 6, Step 2: Apply Row Filter to Locations Table (SQL)
+
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Verify Row Filter Applied (SQL)
+-- Exercise 6, Step 3: Verify Row Filter Is Applied (SQL)
+
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">&#128218; Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 1: Create the row filter function</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC CREATE OR REPLACE FUNCTION region_filter(country_id STRING)
+-- MAGIC RETURNS BOOLEAN
+-- MAGIC RETURN (
+-- MAGIC     is_account_group_member('data_admins')
+-- MAGIC     OR
+-- MAGIC     (is_account_group_member('hr_apac') AND country_id IN ('IN', 'AU', 'SG', 'JP', 'CN'))
+-- MAGIC     OR
+-- MAGIC     (is_account_group_member('hr_emea') AND country_id IN ('UK', 'DE', 'FR', 'IT', 'CH', 'NL'))
+-- MAGIC     OR
+-- MAGIC     (is_account_group_member('hr_amer') AND country_id IN ('US', 'CA', 'MX', 'BR'))
+-- MAGIC     OR
+-- MAGIC     country_id = 'US'
+-- MAGIC );
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 2: Apply the row filter</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC ALTER TABLE locations
+-- MAGIC SET ROW FILTER region_filter ON (country_id);
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 3: Verify</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC SELECT l.country_id, c.country_name, COUNT(*) AS location_count
+-- MAGIC FROM locations l
+-- MAGIC JOIN countries c ON l.country_id = c.country_id
+-- MAGIC GROUP BY l.country_id, c.country_name
+-- MAGIC ORDER BY location_count DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Check Row Filter (Python)
+-- MAGIC %python
+-- MAGIC # Exercise 6: Check Your Work (Python)
+-- MAGIC lab_catalog = spark.sql("SELECT my_catalog").collect()[0][0]
+-- MAGIC
+-- MAGIC result = spark.sql(f"DESCRIBE EXTENDED {lab_catalog}.lab_5.locations").collect()
+-- MAGIC
+-- MAGIC row_filter_found = False
+-- MAGIC for row in result:
+-- MAGIC     if row["col_name"] and "Row Filter" in str(row["col_name"]):
+-- MAGIC         row_filter_found = True
+-- MAGIC         print(f"✅ Row filter found: {row['data_type']}")
+-- MAGIC         break
+-- MAGIC
+-- MAGIC if not row_filter_found:
+-- MAGIC     print("❌ Row filter not detected. Make sure you ran the ALTER TABLE command.")
+-- MAGIC else:
+-- MAGIC     count = spark.sql(f"SELECT COUNT(*) AS cnt FROM {lab_catalog}.lab_5.locations").collect()[0]["cnt"]
+-- MAGIC     print(f"   Visible locations (filtered): {count}")
+-- MAGIC     print("\n   Tip: Without group membership you should see only US locations.")
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Exercise 7: Implement Column Masking
+-- MAGIC
+-- MAGIC Create a column mask to protect employee email addresses. The mask should:
+-- MAGIC - Show full email to members of `hr_managers` group
+-- MAGIC - Show masked email (using the built-in `mask()` function) to everyone else
+-- MAGIC
+-- MAGIC **Your tasks:**
+-- MAGIC 1. Create a masking function for email addresses
+-- MAGIC 2. Apply the column mask to the `employees` table's `email` column
+-- MAGIC 3. Verify the mask is working
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Create Mask Function (SQL)
+-- Exercise 7, Step 1: Create the Column Mask Function (SQL)
+
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Apply Column Mask (SQL)
+-- Exercise 7, Step 2: Apply Column Mask to Email Column (SQL)
+
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Verify Column Mask (SQL)
+-- Exercise 7, Step 3: Verify Column Mask Is Working (SQL)
+
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">&#128218; Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 1: Create the column mask function</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC CREATE OR REPLACE FUNCTION mask_email(email_value STRING)
+-- MAGIC RETURNS STRING
+-- MAGIC RETURN (
+-- MAGIC     CASE
+-- MAGIC         WHEN is_account_group_member('hr_managers') THEN email_value
+-- MAGIC         ELSE mask(email_value)
+-- MAGIC     END
+-- MAGIC );
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 2: Apply the column mask</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC ALTER TABLE employees
+-- MAGIC ALTER COLUMN email SET MASK mask_email;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 3: Verify</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC SELECT employee_id, first_name, last_name, email
+-- MAGIC FROM employees
+-- MAGIC LIMIT 10;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Check Column Mask (Python)
+-- MAGIC %python
+-- MAGIC # Exercise 7: Check Your Work (Python)
+-- MAGIC lab_catalog = spark.sql("SELECT my_catalog").collect()[0][0]
+-- MAGIC
+-- MAGIC desc = spark.sql(f"DESCRIBE EXTENDED {lab_catalog}.lab_5.employees").collect()
+-- MAGIC mask_found = any("Mask" in str(r["col_name"]) for r in desc)
+-- MAGIC
+-- MAGIC if mask_found:
+-- MAGIC     print("✅ Column mask is applied to the employees.email column.")
+-- MAGIC     sample = spark.sql(f"SELECT email FROM {lab_catalog}.lab_5.employees LIMIT 5").collect()
+-- MAGIC     print("   Sample values (masked unless you are in hr_managers group):")
+-- MAGIC     for row in sample:
+-- MAGIC         print(f"     {row['email']}")
+-- MAGIC else:
+-- MAGIC     print("❌ Column mask not detected on employees.email. Check your ALTER TABLE command.")
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Exercise 8: ABAC Column Masking (Capstone)
+-- MAGIC
+-- MAGIC In this capstone exercise, you will implement **Attribute-Based Access Control (ABAC)** to mask employee email addresses in the `employees` table. Unlike manual column masks, ABAC uses **governed tags** and **policies** that inherit across your catalog hierarchy.
+-- MAGIC
+-- MAGIC **Scenario:** Your organisation wants to centrally manage PII protection across the HR schema. Instead of applying individual masks to each table, you will:
+-- MAGIC 1. Remove any existing manual column mask
+-- MAGIC 2. Apply a governed tag to identify the PII column
+-- MAGIC 3. Create a masking UDF
+-- MAGIC 4. Create an ABAC policy that automatically protects all tagged columns
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Step 1: Remove Existing Column Masks
+-- MAGIC
+-- MAGIC ABAC policies and manual column masks **cannot coexist** on the same column. Before applying ABAC, we must remove any manual masks from previous exercises.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Remove Column Mask (SQL)
+-- Exercise 8, Step 1: Remove Existing Column Mask (SQL)
+
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Step 2: Apply Governed Tag to PII Column
+-- MAGIC
+-- MAGIC Governed tags identify which columns should be protected by ABAC policies. In production, you would:
+-- MAGIC
+-- MAGIC 1. Navigate to **Catalog** → **Governed Tags** → **Create governed tag**
+-- MAGIC 2. Create a tag like `pii_type` with allowed values: `email`, `phone`, `ssn`
+-- MAGIC
+-- MAGIC For this exercise, we use the **system governed tag** `class.email_address` which is pre-defined by Databricks.
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <strong>ℹ️ Note:</strong> System governed tags (prefixed with <code>class.</code>) are created by Databricks and cover common PII types such as email addresses, phone numbers, and SSNs.
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Apply Governed Tag (SQL)
+-- Exercise 8, Step 2: Apply Governed Tag to Email Column (SQL)
+
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Verify Governed Tag (SQL)
+-- Exercise 8, Step 2: Verify Governed Tag (SQL)
+
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Step 3: Create Masking UDF
+-- MAGIC
+-- MAGIC ABAC policies reference UDFs that implement the mask logic. The key difference from manual masks:
+-- MAGIC
+-- MAGIC - **Manual masks**: UDF contains authorization logic (`is_account_group_member()`)
+-- MAGIC - **ABAC masks**: UDF contains **only** the masking logic; the **policy** defines WHO is affected
+-- MAGIC
+-- MAGIC The UDF receives the column value and returns the masked (or original) value.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Create Masking UDF (SQL)
+-- Exercise 8, Step 3: Create Masking UDF for ABAC Policy (SQL)
+
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">&#128218; Click to reveal solutions for Steps 1-3</summary>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 1: Remove existing column mask</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Exercise 8, Step 1
+-- MAGIC ALTER TABLE employees
+-- MAGIC ALTER COLUMN email DROP MASK;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 2: Apply governed tag to email column</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Exercise 8, Step 2a: Apply tag
+-- MAGIC ALTER TABLE employees
+-- MAGIC ALTER COLUMN EMAIL SET TAGS ('class.email_address');
+-- MAGIC
+-- MAGIC -- Exercise 8, Step 2b: Verify tag
+-- MAGIC SELECT catalog_name, schema_name, table_name, column_name, tag_name, tag_value
+-- MAGIC FROM information_schema.column_tags
+-- MAGIC WHERE schema_name = 'lab_5' AND table_name = 'employees'
+-- MAGIC ORDER BY column_name;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <div style="margin-top: 16px;"><strong>Step 3: Create masking UDF (no authorization logic — that belongs in the policy)</strong></div>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Exercise 8, Step 3
+-- MAGIC CREATE OR REPLACE FUNCTION abac_mask_email(email STRING)
+-- MAGIC RETURNS STRING
+-- MAGIC RETURN mask(email);
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML =
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Step 4: CHALLENGE - Create the ABAC Policy
+-- MAGIC
+-- MAGIC The policy binds everything together. Your task is to create an ABAC policy that:
+-- MAGIC - Applies to the `hr_raw` schema
+-- MAGIC - Uses the `abac_mask_email` function you created in Step 3
+-- MAGIC - Affects users in the `account users` group
+-- MAGIC - Matches columns tagged with `class.email_address`
+-- MAGIC
+-- MAGIC **Fill in the blanks in the next cell using the hints below:**
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #9c27b0; background: #f3e5f5; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <strong>Hints:</strong>
+-- MAGIC     <ul>
+-- MAGIC         <li>The statement starts with <code>CREATE OR REPLACE POLICY</code></li>
+-- MAGIC         <li>The scope is <code>ON SCHEMA hr_raw</code></li>
+-- MAGIC         <li>The masking function is <code>hr_raw.abac_mask_email</code></li>
+-- MAGIC         <li>The affected group is <code>`account users`</code></li>
+-- MAGIC         <li>Use <code>hasTag('class.email_address')</code> to match columns</li>
+-- MAGIC     </ul>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Create ABAC Policy (SQL)
+-- Exercise 8, Step 4: Create ABAC Column Masking Policy (SQL)
+CREATE OR REPLACE <FILL_IN> mask_email_policy
+ON <FILL_IN>
+COMMENT 'Mask employee email addresses for general users across all tagged tables'
+COLUMN MASK <FILL_IN>
+TO `<FILL_IN>`
+FOR TABLES
+MATCH COLUMNS
+  <FILL_IN> AS email_col
+ON COLUMN email_col;
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">&#128218; Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC CREATE OR REPLACE POLICY mask_email_policy
+-- MAGIC ON SCHEMA lab_5
+-- MAGIC COMMENT 'Mask employee email addresses for general users across all tagged tables'
+-- MAGIC COLUMN MASK lab_5.abac_mask_email
+-- MAGIC TO `account users`
+-- MAGIC FOR TABLES
+-- MAGIC MATCH COLUMNS
+-- MAGIC   hasTag('class.email_address') AS email_col
+-- MAGIC ON COLUMN email_col;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML =
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Step 5: Test the ABAC Policy
+-- MAGIC
+-- MAGIC Query the employees table to verify the masking is working. Since the policy applies to everyone in the `account users` group (which includes you) and there is no `EXCEPT` clause, you should see masked emails.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Test ABAC Policy (SQL)
+-- Exercise 8, Step 5: Test ABAC Masking Policy (SQL)
+
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">&#128218; Click to reveal solution for Step 5</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Exercise 8, Step 5: Test ABAC Masking Policy
+-- MAGIC SELECT employee_id, first_name, last_name, email
+-- MAGIC FROM hr_raw.employees
+-- MAGIC LIMIT 10;
+-- MAGIC -- Since the policy applies to 'account users' (which includes you),
+-- MAGIC -- emails should appear masked (e.g. Xxxxx.xxxxx@Xxxxx.xxx)
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML =
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Validate ABAC Policy (Python)
+-- MAGIC %python
+-- MAGIC # Exercise 8: Validate ABAC Column Masking (Python)
+-- MAGIC lab_catalog = spark.sql("SELECT my_catalog").collect()[0][0]
+-- MAGIC results = {"passed": 0, "failed": 0, "checks": []}
+-- MAGIC
+-- MAGIC # Check 1: Tag is applied
+-- MAGIC try:
+-- MAGIC     tag_check = spark.sql(f"""
+-- MAGIC         SELECT COUNT(*) as cnt FROM {lab_catalog}.information_schema.column_tags
+-- MAGIC         WHERE schema_name = 'lab_5'
+-- MAGIC           AND table_name = 'employees'
+-- MAGIC           AND column_name = 'email'
+-- MAGIC           AND tag_name = 'class.email_address'
+-- MAGIC     """).collect()[0]
+-- MAGIC     if tag_check["cnt"] > 0:
+-- MAGIC         results["passed"] += 1
+-- MAGIC         results["checks"].append("✅ Governed tag 'class.email_address' applied to employees.email")
+-- MAGIC     else:
+-- MAGIC         results["failed"] += 1
+-- MAGIC         results["checks"].append("❌ Tag not found on employees.email — run Step 2")
+-- MAGIC except Exception as e:
+-- MAGIC     results["failed"] += 1
+-- MAGIC     results["checks"].append(f"❌ Tag check failed: {e}")
+-- MAGIC
+-- MAGIC # Check 2: Emails appear masked
+-- MAGIC try:
+-- MAGIC     sample = spark.sql(f"SELECT email FROM {lab_catalog}.lab_5.employees LIMIT 5").collect()
+-- MAGIC     masked = [r["email"] for r in sample if r["email"] and r["email"][0].isupper()]
+-- MAGIC     if masked:
+-- MAGIC         results["passed"] += 1
+-- MAGIC         results["checks"].append("✅ Email column appears masked")
+-- MAGIC     else:
+-- MAGIC         results["failed"] += 1
+-- MAGIC         results["checks"].append("❌ Email column does not appear masked — check your ABAC policy")
+-- MAGIC except Exception as e:
+-- MAGIC     results["failed"] += 1
+-- MAGIC     results["checks"].append(f"❌ Masking check failed: {e}")
+-- MAGIC
+-- MAGIC for c in results["checks"]:
+-- MAGIC     print(c)
+-- MAGIC print(f"\n{'✅ All checks passed!' if results['failed'] == 0 else str(results['failed']) + ' check(s) failed.'}")
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Exercise 9: Monitor Consumer Query Patterns
+-- MAGIC
+-- MAGIC Complete the query to track user growth and query patterns over time using Databricks system tables. This helps you understand how consumers are using the migrated data.
+-- MAGIC
+-- MAGIC **Your task:** Fill in the blanks with the correct functions and system table location.
+-- MAGIC
+-- MAGIC <div id="fillBlankEx9Root"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var dropdowns = [
+-- MAGIC         { id: "func1", label: "function", options: ["DATE_TRUNC", "TRUNC", "DATE_PART", "EXTRACT"], correct: "DATE_TRUNC" },
+-- MAGIC         { id: "func2", label: "function", options: ["COUNT", "SUM", "TOTAL", "NUM"], correct: "COUNT" },
+-- MAGIC         { id: "func3", label: "function", options: ["COUNT", "SUM", "TOTAL", "NUM"], correct: "COUNT" },
+-- MAGIC         { id: "func4", label: "function", options: ["ROUND", "TRUNCATE", "CAST", "FORMAT"], correct: "ROUND" },
+-- MAGIC         { id: "catalog", label: "catalog", options: ["system", "information_schema", "metadata", "catalog"], correct: "system" },
+-- MAGIC         { id: "schema", label: "schema", options: ["query", "billing", "access", "audit"], correct: "query" },
+-- MAGIC         { id: "table", label: "table", options: ["history", "log", "audit", "events"], correct: "history" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function allSelected() {
+-- MAGIC         return dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdown(d) {
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: #dcdcaa; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdownTable(d) {
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4a1c1c';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: #ce9178; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('fillBlankEx9Root');
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: Consumer Query Pattern Monitoring</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var bgColor = score === dropdowns.length ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === dropdowns.length ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + dropdowns.length + ' Correct</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         
+-- MAGIC         html += '<span style="color: #569cd6;">SELECT</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[0]) + '<span style="color: #d4d4d4;">(</span><span style="color: #ce9178;">\'week\'</span><span style="color: #d4d4d4;">, start_time) </span><span style="color: #569cd6;">AS</span> week,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[1]) + '<span style="color: #d4d4d4;">(</span><span style="color: #569cd6;">DISTINCT</span> executed_by<span style="color: #d4d4d4;">) </span><span style="color: #569cd6;">AS</span> unique_users,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[2]) + '<span style="color: #d4d4d4;">(*) </span><span style="color: #569cd6;">AS</span> total_queries,<br/>';
+-- MAGIC         html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(dropdowns[3]) + '<span style="color: #d4d4d4;">(</span><span style="color: #dcdcaa;">AVG</span>(total_duration_ms) / <span style="color: #b5cea8;">1000</span>, <span style="color: #b5cea8;">2</span><span style="color: #d4d4d4;">) </span><span style="color: #569cd6;">AS</span> avg_query_duration_sec<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">FROM</span> ' + makeDropdownTable(dropdowns[4]) + '<span style="color: #d4d4d4;">.</span>' + makeDropdownTable(dropdowns[5]) + '<span style="color: #d4d4d4;">.</span>' + makeDropdownTable(dropdowns[6]) + '<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">WHERE</span> start_time >= <span style="color: #dcdcaa;">CURRENT_DATE</span> - <span style="color: #569cd6;">INTERVAL</span> <span style="color: #b5cea8;">90</span> <span style="color: #569cd6;">DAYS</span><br/>';
+-- MAGIC         html += '&nbsp;&nbsp;<span style="color: #569cd6;">AND</span> statement_type <span style="color: #569cd6;">IN</span> (<span style="color: #ce9178;">\'SELECT\'</span>, <span style="color: #ce9178;">\'SHOW\'</span>, <span style="color: #ce9178;">\'DESCRIBE\'</span>)<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">GROUP BY</span> <span style="color: #dcdcaa;">DATE_TRUNC</span>(<span style="color: #ce9178;">\'week\'</span>, start_time)<br/>';
+-- MAGIC         html += '<span style="color: #569cd6;">ORDER BY</span> week <span style="color: #569cd6;">DESC</span>;';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> The <code>system.query.history</code> table captures all query execution details. Use <code>DATE_TRUNC</code> for time-based grouping and <code>COUNT(DISTINCT executed_by)</code> to track unique users.';
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> The correct source is <code>system.query.history</code>. Use <code>DATE_TRUNC</code> for time aggregation, <code>COUNT</code> for totals, and <code>ROUND</code> for formatting duration.';
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         html += '<button id="checkEx9Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         html += '<button id="resetEx9Btn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         var checkBtn = document.getElementById('checkEx9Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetEx9Btn');
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 init();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Exercise 10: AI/BI Capabilities Matching
+-- MAGIC
+-- MAGIC Match each Databricks AI/BI capability to its description. These tools help consumers interact with migrated data through natural language, machine learning, and advanced analytics.
+-- MAGIC
+-- MAGIC <div id="aiBiMatchRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var concepts = [
+-- MAGIC         ["AI/BI Dashboards", "Interactive visualizations with natural language Q&A", "Build dashboards with AI-assisted chart creation"],
+-- MAGIC         ["Genie Spaces", "Natural language interface for business users", "Ask questions in plain English, get SQL-generated answers"],
+-- MAGIC         ["MLflow", "ML lifecycle management and experiment tracking", "Track experiments, deploy models, manage artifacts"],
+-- MAGIC         ["Model Serving", "Real-time and batch model inference endpoints", "Deploy models as REST APIs with auto-scaling"],
+-- MAGIC         ["Feature Store", "Centralized repository for ML features", "Share and reuse features across models and teams"],
+-- MAGIC         ["Vector Search", "Similarity search for embeddings and RAG", "Power AI applications with semantic search"]
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var matchedPairs = {};
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countMatched() {
+-- MAGIC         return Object.keys(matchedPairs).length;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('aiBiMatchRoot');
+-- MAGIC         var shuffledSources = shuffleArray(concepts);
+-- MAGIC         var shuffledTargets = shuffleArray(concepts);
+-- MAGIC         
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f9f9f9; border-radius: 12px; border: 1px solid #ddd; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<div style="font-size: 1.4em; font-weight: 600; color: #333;">🎯 Match AI/BI Capabilities to Descriptions</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 15px;">';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e8f5e9; color: #2e7d32;">✓ Matched: ' + countMatched() + '</span>';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e3f2fd; color: #1565c0;">○ Remaining: ' + (concepts.length - countMatched()) + '</span>';
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 40px; width: 100%;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #e8eaf6 0%, #c5cae9 100%); color: #3f51b5; text-align: center; margin-bottom: 12px;">🧠 Capability</div>';
+-- MAGIC         
+-- MAGIC         shuffledSources.forEach(function(src) {
+-- MAGIC             var srcKey = src[0];
+-- MAGIC             var isSourceMatched = matchedPairs[srcKey] !== undefined;
+-- MAGIC             
+-- MAGIC             var srcBg = isSourceMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var srcBorder = isSourceMatched ? '#4caf50' : '#3f51b5';
+-- MAGIC             var srcCursor = isSourceMatched ? 'default' : 'grab';
+-- MAGIC             var srcOpacity = isSourceMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div draggable="' + (!isSourceMatched) + '" data-key="' + srcKey + '" class="drag-source-aibi" style="padding: 16px 24px; margin-bottom: 8px; background: ' + srcBg + '; border: 2px solid ' + srcBorder + '; border-radius: 8px; cursor: ' + srcCursor + '; font-size: 1.05em; color: #333; opacity: ' + srcOpacity + '; transition: all 0.15s ease;">' + srcKey + '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); color: #7b1fa2; text-align: center; margin-bottom: 12px;">📖 Description</div>';
+-- MAGIC         
+-- MAGIC         shuffledTargets.forEach(function(tgt) {
+-- MAGIC             var tgtAnswer = tgt[0];
+-- MAGIC             var tgtLabel = tgt[1];
+-- MAGIC             var tgtHint = tgt[2];
+-- MAGIC             var isTargetMatched = false;
+-- MAGIC             var matchedWith = '';
+-- MAGIC             
+-- MAGIC             for (var key in matchedPairs) {
+-- MAGIC                 if (matchedPairs[key] === tgtAnswer) {
+-- MAGIC                     isTargetMatched = true;
+-- MAGIC                     matchedWith = key;
+-- MAGIC                     break;
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             var tgtBg = isTargetMatched ? '#e8f5e9' : '#fff';
+-- MAGIC             var tgtBorder = isTargetMatched ? '2px solid #4caf50' : '2px dashed #9c27b0';
+-- MAGIC             
+-- MAGIC             html += '<div data-answer="' + tgtAnswer + '" data-hint="' + tgtHint + '" class="drop-target-aibi" style="padding: 16px 24px; margin-bottom: 8px; background: ' + tgtBg + '; border: ' + tgtBorder + '; border-radius: 8px; font-size: 1.05em; color: #333; transition: all 0.15s ease;">';
+-- MAGIC             html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
+-- MAGIC             html += '<span style="font-weight: 500;">' + tgtLabel + '</span>';
+-- MAGIC             if (isTargetMatched) {
+-- MAGIC                 html += '<span style="font-size: 0.9em; color: #2e7d32; font-weight: 600;">✓ ' + matchedWith + '</span>';
+-- MAGIC             } else {
+-- MAGIC                 html += '<span style="font-size: 0.9em; color: #aaa; font-style: italic;">Drop here</span>';
+-- MAGIC             }
+-- MAGIC             html += '</div></div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (countMatched() === concepts.length) {
+-- MAGIC             html += '<div style="text-align: center; padding: 30px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 12px; margin-top: 24px;">';
+-- MAGIC             html += '<h3 style="color: #2e7d32; margin: 0 0 10px 0; font-size: 1.6em;">🎉 Perfect Score!</h3>';
+-- MAGIC             html += '<p style="color: #555; margin: 0; font-size: 1.05em;">You\'ve matched all AI/BI capabilities!</p>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 24px; padding-top: 20px; border-top: 2px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">';
+-- MAGIC         html += '<div style="color: #666; font-size: 0.95em;">💡 Drag capabilities from the left to their descriptions on the right</div>';
+-- MAGIC         html += '<button id="resetAiBiBtn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div id="hintBoxAiBi" style="display: none; position: fixed; background: #333; color: white; padding: 12px 16px; border-radius: 8px; font-size: 0.9em; max-width: 300px; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,0.3);"></div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sources = document.querySelectorAll('.drag-source-aibi');
+-- MAGIC         var targets = document.querySelectorAll('.drop-target-aibi');
+-- MAGIC         var resetBtn = document.getElementById('resetAiBiBtn');
+-- MAGIC         
+-- MAGIC         sources.forEach(function(src) {
+-- MAGIC             src.addEventListener('dragstart', function(e) {
+-- MAGIC                 if (matchedPairs[this.dataset.key]) {
+-- MAGIC                     e.preventDefault();
+-- MAGIC                     return;
+-- MAGIC                 }
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC                 e.dataTransfer.setData('text/plain', this.dataset.key);
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             src.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         targets.forEach(function(tgt) {
+-- MAGIC             tgt.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 var isMatched = this.querySelector('span:last-child').textContent.indexOf('✓') !== -1;
+-- MAGIC                 if (!isMatched) {
+-- MAGIC                     this.style.background = '#fff3e0';
+-- MAGIC                     this.style.borderColor = '#ff9800';
+-- MAGIC                     this.style.borderStyle = 'solid';
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('dragleave', function() {
+-- MAGIC                 var isMatched = this.querySelector('span:last-child').textContent.indexOf('✓') !== -1;
+-- MAGIC                 if (!isMatched) {
+-- MAGIC                     this.style.background = '#fff';
+-- MAGIC                     this.style.borderColor = '#9c27b0';
+-- MAGIC                     this.style.borderStyle = 'dashed';
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 var droppedKey = e.dataTransfer.getData('text/plain');
+-- MAGIC                 var correctAnswer = this.dataset.answer;
+-- MAGIC                 
+-- MAGIC                 if (droppedKey === correctAnswer) {
+-- MAGIC                     matchedPairs[droppedKey] = correctAnswer;
+-- MAGIC                     render();
+-- MAGIC                 } else {
+-- MAGIC                     var self = this;
+-- MAGIC                     self.style.background = '#ffebee';
+-- MAGIC                     self.style.borderColor = '#f44336';
+-- MAGIC                     self.style.borderStyle = 'solid';
+-- MAGIC                     
+-- MAGIC                     var hintBox = document.getElementById('hintBoxAiBi');
+-- MAGIC                     var rect = self.getBoundingClientRect();
+-- MAGIC                     hintBox.textContent = '💡 Hint: ' + self.dataset.hint;
+-- MAGIC                     hintBox.style.display = 'block';
+-- MAGIC                     hintBox.style.left = rect.left + 'px';
+-- MAGIC                     hintBox.style.top = (rect.bottom + 10) + 'px';
+-- MAGIC                     
+-- MAGIC                     setTimeout(function() {
+-- MAGIC                         self.style.background = '#fff';
+-- MAGIC                         self.style.borderColor = '#9c27b0';
+-- MAGIC                         self.style.borderStyle = 'dashed';
+-- MAGIC                         hintBox.style.display = 'none';
+-- MAGIC                     }, 2500);
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             matchedPairs = {};
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 🎉 Lab Complete!
+-- MAGIC
+-- MAGIC You've completed the **Enablement & Automation Phase** lab. You should now be able to:
+-- MAGIC
+-- MAGIC ✅ Map Oracle cost concepts (credits, warehouses) to Databricks equivalents (DBUs, SKUs)  
+-- MAGIC ✅ Query Oracle system tables for cost analysis during migration planning  
+-- MAGIC ✅ Query Databricks `system.billing.usage` for cost attribution by tags  
+-- MAGIC ✅ Identify quick wins vs. strategic initiatives for cost optimization  
+-- MAGIC ✅ Extract Oracle row access policies for migration planning  
+-- MAGIC ✅ Implement row filters using `is_account_group_member()` function  
+-- MAGIC ✅ Create column masks to protect sensitive data  
+-- MAGIC ✅ Understand ABAC patterns with governed tags  
+-- MAGIC ✅ Monitor consumer query patterns using `system.query.history`  
+-- MAGIC ✅ Match AI/BI capabilities to their use cases  
+-- MAGIC
+-- MAGIC **Next Steps:** Continue to the **Closeout** phase to learn about documentation, decommissioning, and finalizing your migration.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

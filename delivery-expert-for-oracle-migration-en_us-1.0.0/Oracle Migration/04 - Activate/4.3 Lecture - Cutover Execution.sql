@@ -1,0 +1,813 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">04 - Activate</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Cutover Execution
+-- MAGIC
+-- MAGIC This lesson covers the critical transition from Oracle to Databricks as the production system. You will learn cutover strategies, plan freeze and rollback windows, execute delta catch-up procedures, switch consumers to Databricks, and obtain business sign-off.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you will be able to:
+-- MAGIC
+-- MAGIC - Select an appropriate cutover strategy based on risk tolerance and business requirements
+-- MAGIC - Plan and execute freeze windows with defined rollback procedures
+-- MAGIC - Run delta catch-up to synchronize final changes before cutover
+-- MAGIC - Switch consumers (dashboards, applications, reports) to Databricks endpoints
+-- MAGIC - Validate post-cutover functionality and obtain business sign-off
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 1. Cutover Strategies
+-- MAGIC
+-- MAGIC Selecting the right cutover strategy depends on your organization's risk tolerance, downtime constraints, and operational complexity. Each strategy offers different trade-offs between safety, speed, and resource requirements.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC | Strategy | Description | Risk Level | Downtime | Complexity | Best For |
+-- MAGIC |----------|-------------|------------|----------|------------|----------|
+-- MAGIC | **Big Bang** | Complete switch at a single point in time | High | Planned window | Low | Small datasets, tight timelines |
+-- MAGIC | **Phased/Incremental** | Migrate workloads in stages over time | Low | Minimal | Medium | Large enterprises, complex dependencies |
+-- MAGIC | **Blue-Green** | Parallel environments with instant switchover | Low | Near-zero | High | Mission-critical systems |
+-- MAGIC | **Canary** | Route small percentage of traffic to new system | Very Low | None | High | High-risk workloads, gradual validation |
+-- MAGIC | **A/B Testing** | Split traffic between systems for comparison | Low | None | High | Performance validation, user acceptance |
+-- MAGIC | **Pilot Group** | Migrate specific teams/departments first | Low | Per-group | Medium | Organization-wide rollouts |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 2. Cutover Strategy Patterns
+-- MAGIC
+-- MAGIC The different cutover strategies are detailed below with their respective advantages and disadvantages.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Big Bang Cutover
+-- MAGIC
+-- MAGIC All workloads switch from Oracle to Databricks at a single, planned moment. This approach is straightforward but carries higher risk.
+-- MAGIC <br/>
+-- MAGIC <br/>
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph BB["Big Bang"]
+-- MAGIC         direction LR
+-- MAGIC         BB_SF["Oracle<br/>100%"] -->|"Cutover"| BB_DB["Databricks<br/>100%"]
+-- MAGIC     end
+-- MAGIC     style BB fill:#ffebee,stroke:#c62828,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+-- MAGIC
+-- MAGIC **Advantages:**
+-- MAGIC - Simple coordination and communication
+-- MAGIC - Clear before/after state
+-- MAGIC - Shorter overall migration timeline
+-- MAGIC
+-- MAGIC **Disadvantages:**
+-- MAGIC - Higher risk if issues arise
+-- MAGIC - Requires comprehensive testing beforehand
+-- MAGIC - May require extended downtime window
+-- MAGIC
+-- MAGIC **When to Use:**
+-- MAGIC - Smaller datasets with limited dependencies
+-- MAGIC - Strong confidence in validation results
+-- MAGIC - Business can tolerate planned downtime
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Phased/Incremental Cutover
+-- MAGIC
+-- MAGIC Workloads migrate in planned waves, typically organized by business domain, data criticality, or dependency chains.
+-- MAGIC <br/>
+-- MAGIC <br/>
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph PH["Phased"]
+-- MAGIC         direction LR
+-- MAGIC         PH_OR["Oracle"] -->|"Wave 1"| PH_M1["Mixed"]
+-- MAGIC         PH_M1 -->|"Wave 2"| PH_M2["Mixed"]
+-- MAGIC         PH_M2 -->|"Wave 3"| PH_DB["Databricks"]
+-- MAGIC     end
+-- MAGIC     style PH fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+-- MAGIC
+-- MAGIC **Advantages:**
+-- MAGIC - Lower risk per wave
+-- MAGIC - Learnings from early waves improve later waves
+-- MAGIC - Easier rollback scope
+-- MAGIC
+-- MAGIC **Disadvantages:**
+-- MAGIC - Longer overall timeline
+-- MAGIC - Requires managing dual-system state
+-- MAGIC - Cross-system dependencies can be complex
+-- MAGIC
+-- MAGIC **When to Use:**
+-- MAGIC - Large enterprises with many workloads
+-- MAGIC - Complex interdependencies between systems
+-- MAGIC - Need to demonstrate success incrementally
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Blue-Green Deployment
+-- MAGIC
+-- MAGIC Both systems run in parallel with production data. Traffic switches instantly via DNS, load balancer, or connection string changes.
+-- MAGIC <br/>
+-- MAGIC <br/>
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph BG["Blue-Green"]
+-- MAGIC         direction LR
+-- MAGIC         BG_B["Blue<br/>(Oracle)"] -.->|"Switch"| BG_G["Green<br/>(Databricks)"]
+-- MAGIC     end
+-- MAGIC     style BG fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+-- MAGIC
+-- MAGIC **Advantages:**
+-- MAGIC - Near-zero downtime
+-- MAGIC - Instant rollback capability
+-- MAGIC - Full production testing possible
+-- MAGIC
+-- MAGIC **Disadvantages:**
+-- MAGIC - Requires double infrastructure during transition
+-- MAGIC - Data synchronization complexity
+-- MAGIC - Higher cost during parallel operation
+-- MAGIC
+-- MAGIC **When to Use:**
+-- MAGIC - Mission-critical systems with strict SLAs
+-- MAGIC - Zero-downtime requirements
+-- MAGIC - High confidence needed before commitment
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Canary and A/B Testing
+-- MAGIC
+-- MAGIC A small percentage of traffic routes to Databricks while the majority stays on Oracle. Gradually increase Databricks traffic as confidence grows.
+-- MAGIC <br/>
+-- MAGIC <br/>
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC flowchart LR
+-- MAGIC     subgraph CN["Canary"]
+-- MAGIC         direction LR
+-- MAGIC         CN_SF["Oracle<br/>95%"] --> CN_RT["Router"]
+-- MAGIC         CN_DB["Databricks<br/>5%"] --> CN_RT
+-- MAGIC     end
+-- MAGIC     style CN fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+-- MAGIC
+-- MAGIC **Advantages:**
+-- MAGIC - Minimal blast radius for issues
+-- MAGIC - Real production traffic validation
+-- MAGIC - Data-driven cutover decisions
+-- MAGIC
+-- MAGIC **Disadvantages:**
+-- MAGIC - Requires traffic routing infrastructure
+-- MAGIC - Results must be comparable across systems
+-- MAGIC - Extended parallel operation period
+-- MAGIC
+-- MAGIC **When to Use:**
+-- MAGIC - High-risk workloads where gradual validation is essential
+-- MAGIC - Need to compare real-world performance
+-- MAGIC - User acceptance testing with production data
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 3. Cutover Timeline
+-- MAGIC
+-- MAGIC A typical cutover follows a structured timeline with defined phases, gates, and rollback windows.
+-- MAGIC
+-- MAGIC <div class="mermaid">
+-- MAGIC gantt
+-- MAGIC     title Cutover Execution Timeline
+-- MAGIC     dateFormat  YYYY-MM-DD
+-- MAGIC     section Preparation
+-- MAGIC         Final validation complete       :done, prep1, 2026-03-01, 3d
+-- MAGIC         Stakeholder sign-off            :done, prep2, after prep1, 2d
+-- MAGIC         Runbook review                  :done, prep3, after prep2, 1d
+-- MAGIC     section Freeze Window
+-- MAGIC         Source freeze begins            :crit, freeze1, 2026-03-07, 1d
+-- MAGIC         Delta catch-up sync             :crit, freeze2, after freeze1, 1d
+-- MAGIC         Final reconciliation            :crit, freeze3, after freeze2, 1d
+-- MAGIC     section Cutover
+-- MAGIC         Consumer switchover             :crit, cut1, 2026-03-10, 1d
+-- MAGIC         Smoke testing                   :crit, cut2, after cut1, 1d
+-- MAGIC         Rollback decision gate          :milestone, gate1, after cut2, 0d
+-- MAGIC     section Validation
+-- MAGIC         Dashboard validation            :active, val1, 2026-03-12, 2d
+-- MAGIC         Report validation               :val2, after val1, 2d
+-- MAGIC         Performance monitoring          :val3, 2026-03-12, 5d
+-- MAGIC     section Sign-off
+-- MAGIC         Business sign-off               :milestone, signoff, 2026-03-17, 0d
+-- MAGIC         Hypercare period                :hyper, after signoff, 7d
+-- MAGIC </div>
+-- MAGIC <script type="module"> import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true, theme: "neutral" }); </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 4. Freeze Window Planning
+-- MAGIC
+-- MAGIC The freeze window is a critical period where source system changes are halted to allow final synchronization and validation.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Freeze Window Components
+-- MAGIC
+-- MAGIC | Phase | Duration | Activities | Exit Criteria |
+-- MAGIC |-------|----------|------------|---------------|
+-- MAGIC | **Pre-Freeze** | 1-2 days | Notify stakeholders, disable scheduled jobs, pause CDC | All source writes stopped |
+-- MAGIC | **Delta Catch-up** | 2-4 hours | Run final incremental sync, process remaining CDC events | Row counts match, no pending changes |
+-- MAGIC | **Reconciliation** | 2-4 hours | Run Lakebridge reconcile, validate aggregations | Zero data discrepancies |
+-- MAGIC | **Go/No-Go Gate** | 30 min | Review validation results, confirm rollback readiness | Stakeholder approval |
+-- MAGIC | **Cutover** | 1-2 hours | Switch connection strings, update DNS, redirect consumers | All consumers on Databricks |
+-- MAGIC | **Smoke Test** | 1-2 hours | Run critical queries, verify dashboards, check alerting | All tests pass |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #ff9800; background: #fff3e0; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">⚠️</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #e65100; font-size: 1.1em;">Freeze Window Coordination</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Coordinate freeze windows with all upstream data producers and downstream consumers. Communicate the freeze schedule well in advance (typically 1-2 weeks). Have clear escalation paths for any critical changes that must occur during the freeze.</p>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## 5. Executing the Freeze
+-- MAGIC
+-- MAGIC Once all parties have confirmed the freeze window, stop all writes to Oracle, capture a final synchronisation point, and verify no pending changes remain before triggering the delta catch-up.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Suspending Oracle Workloads
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Suspend scheduler jobs (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Disable Oracle Scheduler jobs to stop all scheduled writes
+-- MAGIC EXEC DBMS_SCHEDULER.DISABLE('HR.DAILY_METRIC_JOB');
+-- MAGIC EXEC DBMS_SCHEDULER.DISABLE('HR.REFRESH_JOB');
+-- MAGIC <br/>
+-- MAGIC -- Verify all jobs are disabled before proceeding
+-- MAGIC SELECT job_name, state, enabled
+-- MAGIC FROM DBA_SCHEDULER_JOBS
+-- MAGIC WHERE owner = 'HR'
+-- MAGIC ORDER BY job_name;
+-- MAGIC <br/>
+-- MAGIC -- Record the current SCN as the freeze point (used for rollback and catch-up)
+-- MAGIC SELECT current_scn, SYSDATE AS freeze_timestamp
+-- MAGIC FROM V$DATABASE;
+-- MAGIC <br/>
+-- MAGIC -- Confirm no uncommitted transactions remain on migrated tables
+-- MAGIC SELECT s.username, s.status, t.used_ublk, t.used_urec
+-- MAGIC FROM V$SESSION s
+-- MAGIC JOIN V$TRANSACTION t ON s.taddr = t.addr
+-- MAGIC WHERE s.schemaname = 'HR';
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 6. Delta Catch-up Synchronization
+-- MAGIC
+-- MAGIC Run final incremental sync to capture any changes that occurred since the last replication cycle.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Using Change Data Feed for Sync Tracking</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">If Change Data Feed (CDF) is enabled, you can use system columns <code>_commit_timestamp</code> and <code>_commit_version</code> via the <code>table_changes()</code> function for precise transaction-level sync tracking:</p>
+-- MAGIC             <div class="code-block" data-language="sql">-- Enable CDF on a table
+-- MAGIC ALTER TABLE my_table SET TBLPROPERTIES (delta.enableChangeDataFeed = true);
+-- MAGIC
+-- MAGIC -- Query changes since a version or timestamp
+-- MAGIC SELECT * FROM table_changes('my_table', '2025-01-15T00:00:00');</div>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Run Lakebridge Final Reconciliation
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC # Run final Lakebridge reconciliation before cutover
+-- MAGIC databricks labs lakebridge reconcile
+-- MAGIC <br/>
+-- MAGIC # Verify all tables pass validation
+-- MAGIC # Check the AI/BI Dashboard for the recon_id results
+-- MAGIC <br/>
+-- MAGIC # If any discrepancies, investigate before proceeding
+-- MAGIC databricks labs lakebridge aggregates-reconcile
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'bash';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 7. Consumer Switchover
+-- MAGIC
+-- MAGIC Switch downstream consumers from Oracle to Databricks endpoints. This includes BI tools, applications, reports, and data science workloads.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Consumer Migration Checklist
+-- MAGIC
+-- MAGIC | Consumer Type | <span style="white-space: nowrap;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="20" height="20" style="vertical-align: middle;" /> Oracle</span> | <span style="white-space: nowrap;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="20" height="20" style="vertical-align: middle;"> Databricks</span> | Switchover Method |
+-- MAGIC |---------------|---------------------|----------------------|-------------------|
+-- MAGIC | **BI Dashboards** | Oracle connector | Databricks SQL connector | Update data source |
+-- MAGIC | **Scheduled Reports** | Oracle JDBC | Databricks JDBC/ODBC | Update connection string |
+-- MAGIC | **Applications** | Oracle driver | Databricks driver | Configuration change |
+-- MAGIC | **Data Science** | OML4Py | PySpark / Databricks Connect | Code update |
+-- MAGIC | **ETL Downstream** | Oracle tables | Unity Catalog tables | Update source references |
+-- MAGIC | **APIs** | Oracle SQL API | Databricks SQL Statement API | Endpoint change |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Connection String Updates
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 JDBC Connection String Examples</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="bash">
+-- MAGIC # Oracle JDBC (before)
+-- MAGIC jdbc:oracle:thin:@//hostname:1521/ORCL
+-- MAGIC <br/>
+-- MAGIC # Databricks JDBC (after)
+-- MAGIC jdbc:databricks://dbc-xxxxx.cloud.databricks.com:443/default;transportMode=http;ssl=1;AuthMech=3;httpPath=/sql/1.0/warehouses/abc123def456
+-- MAGIC <br/>
+-- MAGIC # Databricks JDBC with Unity Catalog
+-- MAGIC jdbc:databricks://dbc-xxxxx.cloud.databricks.com:443/default;transportMode=http;ssl=1;AuthMech=3;httpPath=/sql/1.0/warehouses/abc123def456;ConnCatalog=migration_dev;ConnSchema=tasty_bytes_raw
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'bash';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 8. Rollback Planning
+-- MAGIC
+-- MAGIC Every cutover must have a defined rollback procedure. Document the rollback window, triggers, and execution steps before starting cutover.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Rollback Decision Matrix
+-- MAGIC
+-- MAGIC | Condition | Severity | Action | Rollback? |
+-- MAGIC |-----------|----------|--------|-----------|
+-- MAGIC | Data discrepancy < 0.01% | Low | Investigate, continue monitoring | No |
+-- MAGIC | Data discrepancy 0.01-1% | Medium | Pause cutover, investigate root cause | Maybe |
+-- MAGIC | Data discrepancy > 1% | High | Immediate rollback | Yes |
+-- MAGIC | Critical dashboard failure | High | Immediate rollback | Yes |
+-- MAGIC | Performance degradation > 50% | High | Rollback if not resolved in 1 hour | Yes |
+-- MAGIC | Non-critical report issue | Low | Document, fix in place | No |
+-- MAGIC | Job failure (non-critical) | Medium | Retry, escalate if persistent | No |
+-- MAGIC | Multiple job failures | High | Assess scope, consider rollback | Maybe |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #f44336; background: #ffebee; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">❌</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #c62828; font-size: 1.1em;">Rollback Procedure</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">If rollback is required:</p>
+-- MAGIC             <ol style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Announce rollback decision to all stakeholders</li>
+-- MAGIC                 <li>Revert consumer connection strings to Oracle</li>
+-- MAGIC                 <li>Resume suspended Oracle tasks and streams</li>
+-- MAGIC                 <li>Verify Oracle data is current (no data loss during cutover window)</li>
+-- MAGIC                 <li>Confirm all dashboards and reports are functional</li>
+-- MAGIC                 <li>Document rollback reason and lessons learned</li>
+-- MAGIC                 <li>Schedule post-mortem and remediation planning</li>
+-- MAGIC             </ol>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 8px 0;">🔽 Oracle: Rollback commands (run in Oracle)</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Re-enable Oracle Scheduler jobs
+-- MAGIC EXEC DBMS_SCHEDULER.ENABLE('HR.DAILY_METRICS_JOB');
+-- MAGIC EXEC DBMS_SCHEDULER.ENABLE('HR.REFRESH_JOB');
+-- MAGIC <br/>
+-- MAGIC -- Verify jobs are re-enabled and next scheduled run is set
+-- MAGIC SELECT job_name, state, enabled, next_run_date
+-- MAGIC FROM DBA_SCHEDULER_JOBS
+-- MAGIC WHERE owner = 'HR'
+-- MAGIC ORDER BY job_name;
+-- MAGIC <br/>
+-- MAGIC -- Check for any data gaps during the freeze window
+-- MAGIC -- Oracle date arithmetic: SYSDATE - 1/24 = 1 hour ago
+-- MAGIC SELECT
+-- MAGIC     MIN(order_ts) AS earliest_order,
+-- MAGIC     MAX(order_ts) AS latest_order,
+-- MAGIC     COUNT(*)      AS order_count
+-- MAGIC FROM orcl.raw_pos.order_header
+-- MAGIC WHERE order_ts >= SYSDATE - 1/24;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(() => this.textContent = 'Copy', 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 9. Post-Cutover Validation
+-- MAGIC
+-- MAGIC After switching consumers, validate that all dashboards, reports, and applications function correctly on Databricks.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Smoke Test Checklist
+-- MAGIC
+-- MAGIC Execute these tests immediately after cutover:
+-- MAGIC
+-- MAGIC | Test | Query/Action | Expected Result | Pass/Fail |
+-- MAGIC |------|--------------|-----------------|-----------|
+-- MAGIC | Table accessibility | `SELECT COUNT(*) FROM table` | Returns count | ☐ |
+-- MAGIC | Join performance | Multi-table join query | Completes < 30s | ☐ |
+-- MAGIC | Aggregation accuracy | SUM/AVG matches baseline | Within 0.01% | ☐ |
+-- MAGIC | Dashboard load | Open primary dashboard | Renders correctly | ☐ |
+-- MAGIC | Scheduled job | Trigger test job | Completes successfully | ☐ |
+-- MAGIC | Alert functionality | Trigger test alert | Notification received | ☐ |
+-- MAGIC | User access | Test user queries table | Access granted | ☐ |
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 10. Business Sign-off
+-- MAGIC
+-- MAGIC Formal sign-off confirms that the migration meets acceptance criteria and the organization is ready to operate on Databricks.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Sign-off Checklist
+-- MAGIC
+-- MAGIC | Criteria | Owner | Status | Sign-off Date |
+-- MAGIC |----------|-------|--------|---------------|
+-- MAGIC | Data validation complete (row counts, aggregations) | Data Engineering | ☐ | |
+-- MAGIC | All dashboards functional | BI Team | ☐ | |
+-- MAGIC | Scheduled reports verified | Analytics | ☐ | |
+-- MAGIC | Application connectivity confirmed | Development | ☐ | |
+-- MAGIC | Performance within SLA | Data Engineering | ☐ | |
+-- MAGIC | Security and access controls verified | Security | ☐ | |
+-- MAGIC | Runbooks and documentation updated | Operations | ☐ | |
+-- MAGIC | Hypercare support plan in place | Support | ☐ | |
+-- MAGIC | **Final Business Approval** | Business Sponsor | ☐ | |
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #009688; background: #e0f2f1; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">💡</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #00695c; font-size: 1.1em;">Hypercare Period</strong>
+-- MAGIC             <p style="margin: 8px 0 0 0; color: #333;">Plan for a hypercare period (typically 1-2 weeks) immediately following cutover. During this time:</p>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Maintain enhanced monitoring and alerting thresholds</li>
+-- MAGIC                 <li>Keep migration team on-call for rapid response</li>
+-- MAGIC                 <li>Hold daily stand-ups to review issues and metrics</li>
+-- MAGIC                 <li>Officially archive Oracle jobs (e.g. `DBMS_SCHEDULER.DISABLE`) to prevent dual processing</li>
+-- MAGIC                 <li>Track key performance indicators (KPIs) such as cost, performance, and availability</li>
+-- MAGIC                 <li>Document any incidents and resolutions</li>
+-- MAGIC                 <li>Gather user feedback for optimization</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <div style="border-left: 4px solid #4caf50; background: #e8f5e9; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC     <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC         <span style="font-size: 24px;">✅</span>
+-- MAGIC         <div>
+-- MAGIC             <strong style="color: #2e7d32; font-size: 1.1em;">Cutover Execution Checklist</strong>
+-- MAGIC             <ul style="margin: 8px 0 0 0; color: #333; padding-left: 20px;">
+-- MAGIC                 <li>Cutover strategy selected and communicated</li>
+-- MAGIC                 <li>Freeze window scheduled with stakeholders</li>
+-- MAGIC                 <li>Rollback procedure documented and tested</li>
+-- MAGIC                 <li>Source tasks/streams suspended</li>
+-- MAGIC                 <li>Delta catch-up synchronization complete</li>
+-- MAGIC                 <li>Final Lakebridge reconciliation passed</li>
+-- MAGIC                 <li>Consumer connection strings updated</li>
+-- MAGIC                 <li>Smoke tests passed</li>
+-- MAGIC                 <li>Dashboards and reports validated</li>
+-- MAGIC                 <li>Business sign-off obtained</li>
+-- MAGIC                 <li>Hypercare period initiated</li>
+-- MAGIC             </ul>
+-- MAGIC         </div>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Summary
+-- MAGIC
+-- MAGIC This lesson covered the end-to-end cutover process: selecting a strategy, planning the freeze window, executing delta catch-up, switching consumers, validating post-cutover, and obtaining business sign-off.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Cutover Strategies
+-- MAGIC
+-- MAGIC - **Big Bang** - Fastest timeline, higher risk
+-- MAGIC - **Phased/Canary** - Lower risk, longer timeline
+-- MAGIC - **Blue-Green** - Zero downtime, requires parallel infrastructure
+-- MAGIC
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Critical Success Factors
+-- MAGIC
+-- MAGIC - Clear stakeholder communication with defined timeline
+-- MAGIC - Tested rollback plan with defined revert window
+-- MAGIC - Validated data parity via Lakebridge reconciliation
+-- MAGIC - Smoke tests pass (dashboards, reports, queries)
+-- MAGIC - Performance meets or exceeds Oracle baselines
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### References
+-- MAGIC
+-- MAGIC - [Databricks SQL Connector](https://docs.databricks.com/en/integrations/jdbc-odbc-bi.html)
+-- MAGIC - [Unity Catalog Migration Guide](https://docs.databricks.com/en/data-governance/unity-catalog/index.html)
+-- MAGIC - [Lakebridge Reconciler](https://databrickslabs.github.io/lakebridge/docs/reconcile/)
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

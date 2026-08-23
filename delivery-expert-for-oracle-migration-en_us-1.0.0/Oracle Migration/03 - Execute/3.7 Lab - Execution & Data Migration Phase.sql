@@ -1,0 +1,1625 @@
+-- Databricks notebook source
+-- MAGIC %md-sandbox
+-- MAGIC <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #F8F9FA; border-bottom: 2px solid #E0E0E0; margin: 0; line-height: 1;">
+-- MAGIC     <div style="font-size: 14px; color: #666;">
+-- MAGIC         <span style="font-weight: bold; color: #333;">Oracle -> Databricks Migration</span>
+-- MAGIC         <span style="margin-left: 8px; color: #999;">|</span>
+-- MAGIC         <span style="margin-left: 8px;">03 - Execute</span>
+-- MAGIC     </div>
+-- MAGIC     <div style="display: flex; align-items: center; gap: 8px;">
+-- MAGIC         <img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="24" height="24" />
+-- MAGIC         <span style="color: #999; font-size: 16px;">-></span>
+-- MAGIC         <img src="https://cdn.simpleicons.org/databricks/FF3621" width="24" height="24"/>
+-- MAGIC     </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC
+-- MAGIC <div style="
+-- MAGIC   border-left: 4px solid #1976d2;
+-- MAGIC   background: #e3f2fd;
+-- MAGIC   padding: 14px 18px;
+-- MAGIC   border-radius: 4px;
+-- MAGIC   margin: 16px 0;
+-- MAGIC ">
+-- MAGIC   <strong style="display:block; color:#0d47a1; margin-bottom:6px; font-size: 1.1em;">
+-- MAGIC     Complete this Notebook in the Databricks Academy Provided Workspace
+-- MAGIC   </strong>
+-- MAGIC   <div style="color:#333;">
+-- MAGIC This notebook is designed to run in a Databricks Academy provided Vocareum workspace.
+-- MAGIC
+-- MAGIC Work through the notebook in sequence. Skipping steps may cause later sections to fail.
+-- MAGIC   </div>
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Lab: Execution & Data Migration Phase
+-- MAGIC
+-- MAGIC This hands-on lab tests your understanding of the Execution & Data Migration phase. You will complete quizzes to reinforce key concepts and execute SQL commands to ingest and transform data in your migration target environment.
+-- MAGIC
+-- MAGIC **Lab Format:** Interactive quizzes + SQL code exercises
+-- MAGIC
+-- MAGIC **Topics Covered:**
+-- MAGIC - Schema and DDL Conversion: Oracle metadata queries and datatype mapping
+-- MAGIC - Data Migration and Ingestion: `COPY INTO`, Liquid Clustering
+-- MAGIC - Incremental Sync and CDC: CDC concepts and Lakeflow SDP patterns
+-- MAGIC - SQL and Code Conversion: Function translation (dates and times, JSON columns)
+-- MAGIC - Pipeline and Orchestration: Stored procedures and Lakeflow Jobs
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Lab Setup (run this first)
+-- MAGIC
+-- MAGIC Run the following cell to create your unique lab catalog name. This variable will be used throughout the lab exercises to ensure each learner has their own isolated environment. A schema and a volume will be created, too.
+-- MAGIC
+-- MAGIC **Important:** You must run this cell before proceeding with any other exercises. 
+-- MAGIC
+-- MAGIC This lab uses the Oracle HR sample dataset. For the complete license, see `assets/data/LICENSE.txt`.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ## Compute Requirements
+-- MAGIC
+-- MAGIC <div style="border-left: 4px solid #1976d2; background: #e3f2fd; padding: 16px 20px; border-radius: 4px; margin: 16px 0;">
+-- MAGIC   <div style="display: flex; align-items: flex-start; gap: 12px;">
+-- MAGIC     <span style="font-size: 24px;">🚨</span>
+-- MAGIC     <div>
+-- MAGIC       <strong style="color: #1565c0; font-size: 1.1em;">REQUIRED – SQL WAREHOUSE OR SERVERLESS COMPUTE</strong>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;">This notebook runs on both <strong>SQL Warehouse</strong> and <strong>Serverless compute</strong>. Select your preferred compute resource before executing any cells.</p>
+-- MAGIC       <p style="margin: 8px 0 0 0; color: #333;"><strong>Testing configuration:</strong> This demo was tested using SQL Warehouse</strong> and Serverless compute <strong>version 4</strong>. For more details on Serverless versions, see the <a href="https://docs.databricks.com/aws/en/compute/serverless/dependencies" style="color: #1565c0; text-decoration: none; font-weight: 500;">Databricks documentation</a>.</p>
+-- MAGIC     </div>
+-- MAGIC   </div>
+-- MAGIC </div>
+
+-- COMMAND ----------
+
+-- MAGIC %run ../Includes/Classroom-Setup-Lab-3
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Schema and DDL Conversion
+-- MAGIC
+-- MAGIC In this lesson, you learned how to extract schema metadata from Oracle using system tables and views, map Oracle datatypes to Databricks equivalents, and convert DDL statements for Unity Catalog.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 1: Oracle Metadata Extraction Queries
+-- MAGIC
+-- MAGIC Complete the Oracle SQL queries by filling in the blanks. These queries would be run in Oracle to extract metadata for DDL conversion.
+-- MAGIC
+-- MAGIC <div id="fillBlankEx1Root"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC
+-- MAGIC     var challenges = [
+-- MAGIC         {
+-- MAGIC             title: "List Tables in Schema (Oracle)",
+-- MAGIC             description: "List all tables in the HR schema with row counts and sizes.",
+-- MAGIC             dropdowns: [
+-- MAGIC                 { id: "col1", options: ["num_rows", "row_count", "table_rows"], correct: "num_rows" },
+-- MAGIC                 { id: "view1", options: ["ALL_TABLES", "ALL_OBJECTS", "ALL_TAB_COLUMNS"], correct: "ALL_TABLES" },
+-- MAGIC                 { id: "cond1", options: ["owner = 'HR'", "table_schema = 'HR'", "schema = 'HR'"], correct: "owner = 'HR'" }
+-- MAGIC             ],
+-- MAGIC             successMsg: "Use <code>ALL_TABLES</code> for Oracle table metadata, <code>num_rows</code> for row count, and filter with <code>owner = 'HR'</code>.",
+-- MAGIC             failMsg: "Query <code>ALL_TABLES</code>, select <code>num_rows</code>, and filter <code>owner = 'HR'</code>."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             title: "Extract Table Column Metadata (Oracle)",
+-- MAGIC             description: "List all columns for tables in the HR schema, including datatype and ordinal position.",
+-- MAGIC             dropdowns: [
+-- MAGIC                 { id: "view2", options: ["ALL_OBJECTS", "ALL_TAB_COLUMNS", "ALL_TABLES"], correct: "ALL_TAB_COLUMNS" },
+-- MAGIC                 { id: "col2", options: ["ordinal_position", "column_id", "col_order"], correct: "column_id" },
+-- MAGIC                 { id: "cond2", options: ["owner = 'HR'", "table_schema = 'HR'", "schema = 'HR'"], correct: "owner = 'HR'" }
+-- MAGIC             ],
+-- MAGIC             successMsg: "Use <code>ALL_TAB_COLUMNS</code> for Oracle column metadata, <code>column_id</code> for ordinal position, and filter with <code>owner = 'HR'</code>.",
+-- MAGIC             failMsg: "Query <code>ALL_TAB_COLUMNS</code>, select <code>column_id</code>, and filter <code>owner = 'HR'</code>."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             title: "Extract DDL for Table (Oracle)",
+-- MAGIC             description: "Extract the complete DDL for the EMPLOYEES table in the HR schema using Oracle's built-in function.",
+-- MAGIC             dropdowns: [
+-- MAGIC                 { id: "table3", options: ["'EMPLOYEES'", "'HR'", "'STAFF'"], correct: "'EMPLOYEES'" },
+-- MAGIC                 { id: "schema3", options: ["'HR'", "'EMPLOYEES'", "'FINANCE'"], correct: "'HR'" },
+-- MAGIC                 { id: "dual3", options: ["dual", "duel", "dull"], correct: "dual" }
+-- MAGIC             ],
+-- MAGIC             successMsg: "Use <code>DBMS_METADATA.GET_DDL</code> to extract DDL, with the correct table and schema names, and select from <code>dual</code>.",
+-- MAGIC             failMsg: "Use <code>DBMS_METADATA.GET_DDL('TABLE', 'EMPLOYEES', 'HR')</code> and select from <code>dual</code>."
+-- MAGIC         },
+-- MAGIC         {
+-- MAGIC             title: "Extract DDL for All Tables in Schema (Oracle)",
+-- MAGIC             description: "Extract the DDL for all tables in the HR schema using Oracle's built-in function.",
+-- MAGIC             dropdowns: [
+-- MAGIC                 { id: "func4", options: ["DBMS_METADATA.GET_DDL", "DBMS_METADATA.SHOW_DDL", "DBMS_METADATA.EXTRACT_DDL"], correct: "DBMS_METADATA.GET_DDL" },
+-- MAGIC                 { id: "table4", options: ["table_name", "owner", "object_name"], correct: "table_name" },
+-- MAGIC                 { id: "cond4", options: ["owner = 'HR'", "table_schema = 'HR'", "schema = 'HR'"], correct: "owner = 'HR'" }
+-- MAGIC             ],
+-- MAGIC             successMsg: "Use <code>DBMS_METADATA.GET_DDL('TABLE', table_name, owner)</code> from <code>ALL_TABLES</code> and filter with <code>owner = 'HR'</code>.",
+-- MAGIC             failMsg: "Use <code>DBMS_METADATA.GET_DDL('TABLE', table_name, owner)</code> from <code>ALL_TABLES</code> and filter with <code>owner = 'HR'</code>."
+-- MAGIC         }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var currentChallenge = 0;
+-- MAGIC     var selections = {};
+-- MAGIC     var showResults = false;
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         currentChallenge = 0;
+-- MAGIC         selections = {};
+-- MAGIC         showResults = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countCorrect() {
+-- MAGIC         var correct = 0;
+-- MAGIC         challenges[currentChallenge].dropdowns.forEach(function(d) {
+-- MAGIC             if (selections[d.id] === d.correct) correct++;
+-- MAGIC         });
+-- MAGIC         return correct;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function allSelected() {
+-- MAGIC         return challenges[currentChallenge].dropdowns.every(function(d) {
+-- MAGIC             return selections[d.id] !== undefined;
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function makeDropdown(d, color) {
+-- MAGIC         var textColor = color || '#ce9178';
+-- MAGIC         var bgColor = '#2d2d2d';
+-- MAGIC         var borderColor = '#555';
+-- MAGIC         if (showResults && selections[d.id]) {
+-- MAGIC             bgColor = selections[d.id] === d.correct ? '#1b4332' : '#4caf50';
+-- MAGIC             borderColor = selections[d.id] === d.correct ? '#4caf50' : '#f44336';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         var html = '<select id="dropdown_' + d.id + '" style="background: ' + bgColor + '; color: ' + textColor + '; border: 2px solid ' + borderColor + '; border-radius: 4px; padding: 4px 8px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; cursor: pointer;">';
+-- MAGIC         html += '<option value="">-- select --</option>';
+-- MAGIC         d.options.forEach(function(opt) {
+-- MAGIC             var selected = selections[d.id] === opt ? ' selected' : '';
+-- MAGIC             html += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC         });
+-- MAGIC         html += '</select>';
+-- MAGIC         
+-- MAGIC         if (showResults && selections[d.id] && selections[d.id] !== d.correct) {
+-- MAGIC             html += '<span style="color: #4caf50; font-size: 0.85em; margin-left: 6px;">→ ' + d.correct + '</span>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         return html;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('fillBlankEx1Root');
+-- MAGIC         var c = challenges[currentChallenge];
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333;">📝 Complete the Query: ' + c.title + '</div>';
+-- MAGIC         if (showResults) {
+-- MAGIC             var score = countCorrect();
+-- MAGIC             var total = c.dropdowns.length;
+-- MAGIC             var bgColor = score === total ? '#e8f5e9' : '#ffebee';
+-- MAGIC             var textColor = score === total ? '#2e7d32' : '#c62828';
+-- MAGIC             html += '<span style="padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; background: ' + bgColor + '; color: ' + textColor + ';">' + score + '/' + total + ' Correct</span>';
+-- MAGIC         } else {
+-- MAGIC             html += '<span style="padding: 6px 14px; border-radius: 16px; font-size: 0.85em; background: #e3f2fd; color: #1565c0;">Challenge ' + (currentChallenge + 1) + ' of ' + challenges.length + '</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="padding: 12px 16px; background: #e3f2fd; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #1976d2;">';
+-- MAGIC         html += '<div style="color: #333;">' + c.description + '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="background: #1e1e1e; border-radius: 8px; padding: 20px; font-family: Consolas, Monaco, monospace; font-size: 0.95em; line-height: 1.8; color: #d4d4d4;">';
+-- MAGIC         
+-- MAGIC         if (currentChallenge === 0) {
+-- MAGIC             // List Tables in Schema (Oracle)
+-- MAGIC             html += '<span style="color: #569cd6;">SELECT</span><br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;owner <span style="color: #569cd6;">AS</span> schema_name,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;table_name,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(c.dropdowns[0], '#4ec9b0') + ' <span style="color: #569cd6;">AS</span> row_count,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;blocks * 8 * 1024 <span style="color: #569cd6;">AS</span> size_bytes,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;last_analyzed<br/>';
+-- MAGIC             html += '<span style="color: #569cd6;">FROM</span> ' + makeDropdown(c.dropdowns[1], '#4ec9b0') + '<br/>';
+-- MAGIC             html += '<span style="color: #569cd6;">WHERE</span> ' + makeDropdown(c.dropdowns[2], '#ce9178') + ' <span style="color: #6a9955;">-- Replace with your schema name</span><br/>';
+-- MAGIC             html += '<span style="color: #569cd6;">ORDER BY</span> table_name;';
+-- MAGIC         } else if (currentChallenge === 1) {
+-- MAGIC             // Extract Table Column Metadata (Oracle)
+-- MAGIC             html += '<span style="color: #569cd6;">SELECT</span><br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;owner <span style="color: #569cd6;">AS</span> schema_name,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;table_name,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;column_name,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;' + makeDropdown(c.dropdowns[1], '#4ec9b0') + ' <span style="color: #569cd6;">AS</span> ordinal_position,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;data_type,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;data_length,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;data_precision,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;data_scale,<br/>';
+-- MAGIC             html += '&nbsp;&nbsp;&nbsp;&nbsp;nullable<br/>';
+-- MAGIC             html += '<span style="color: #569cd6;">FROM</span> ' + makeDropdown(c.dropdowns[0], '#4ec9b0') + '<br/>';
+-- MAGIC             html += '<span style="color: #569cd6;">WHERE</span> ' + makeDropdown(c.dropdowns[2], '#ce9178') + ' <span style="color: #6a9955;">-- Replace with your schema name</span><br/>';
+-- MAGIC             html += '<span style="color: #569cd6;">ORDER BY</span> table_name, column_id;';
+-- MAGIC         } else if (currentChallenge === 2) {
+-- MAGIC             // Extract DDL for Table (Oracle)
+-- MAGIC             html += '<span style="color: #569cd6;">SELECT</span> DBMS_METADATA.GET_DDL';
+-- MAGIC             html += "('TABLE', ";
+-- MAGIC             html += makeDropdown(c.dropdowns[0], '#ce9178');
+-- MAGIC             html += ", ";
+-- MAGIC             html += makeDropdown(c.dropdowns[1], '#ce9178');
+-- MAGIC             html += ")<br/>";
+-- MAGIC             html += '<span style="color: #569cd6;">FROM</span> ' + makeDropdown(c.dropdowns[2], '#4ec9b0') + ';';
+-- MAGIC         } else {
+-- MAGIC             // Extract DDL for All Tables in Schema (Oracle)
+-- MAGIC             html += '<span style="color: #569cd6;">SELECT</span> ';
+-- MAGIC             html += makeDropdown(c.dropdowns[0], '#dcdcaa');
+-- MAGIC             html += "('TABLE', ";
+-- MAGIC             html += makeDropdown(c.dropdowns[1], '#ce9178');
+-- MAGIC             html += ", owner)<br/>";
+-- MAGIC             html += '<span style="color: #569cd6;">FROM</span> ALL_TABLES<br/>';
+-- MAGIC             html += '<span style="color: #569cd6;">WHERE</span> ' + makeDropdown(c.dropdowns[2], '#ce9178') + ';';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (showResults) {
+-- MAGIC             var isAllCorrect = countCorrect() === c.dropdowns.length;
+-- MAGIC             html += '<div style="margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: ' + (isAllCorrect ? '#e8f5e9' : '#fff3e0') + '; border-left: 4px solid ' + (isAllCorrect ? '#4caf50' : '#ff9800') + ';">';
+-- MAGIC             if (isAllCorrect) {
+-- MAGIC                 html += '<strong style="color: #2e7d32;">✓ Correct!</strong> ' + c.successMsg;
+-- MAGIC             } else {
+-- MAGIC                 html += '<strong style="color: #e65100;">Not quite.</strong> ' + c.failMsg;
+-- MAGIC             }
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">';
+-- MAGIC         
+-- MAGIC         if (!showResults) {
+-- MAGIC             html += '<button id="checkEx1Btn" style="padding: 12px 28px; background: ' + (allSelected() ? '#4caf50' : '#ccc') + '; color: white; border: none; border-radius: 6px; cursor: ' + (allSelected() ? 'pointer' : 'not-allowed') + '; font-size: 1em; font-weight: 600;"' + (allSelected() ? '' : ' disabled') + '>Check Answer</button>';
+-- MAGIC         } else {
+-- MAGIC             if (currentChallenge < challenges.length - 1) {
+-- MAGIC                 html += '<button id="nextEx1Btn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">Next Challenge →</button>';
+-- MAGIC             }
+-- MAGIC         }
+-- MAGIC         html += '<button id="resetEx1Btn" style="padding: 12px 28px; background: #757575; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         challenges[currentChallenge].dropdowns.forEach(function(d) {
+-- MAGIC             var dropdown = document.getElementById('dropdown_' + d.id);
+-- MAGIC             if (dropdown) {
+-- MAGIC                 dropdown.addEventListener('change', function() {
+-- MAGIC                     selections[d.id] = this.value || undefined;
+-- MAGIC                     if (!showResults) render();
+-- MAGIC                 });
+-- MAGIC             }
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         var checkBtn = document.getElementById('checkEx1Btn');
+-- MAGIC         var nextBtn = document.getElementById('nextEx1Btn');
+-- MAGIC         var resetBtn = document.getElementById('resetEx1Btn');
+-- MAGIC         
+-- MAGIC         if (checkBtn) {
+-- MAGIC             checkBtn.addEventListener('click', function() {
+-- MAGIC                 if (allSelected()) {
+-- MAGIC                     showResults = true;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (nextBtn) {
+-- MAGIC             nextBtn.addEventListener('click', function() {
+-- MAGIC                 currentChallenge++;
+-- MAGIC                 selections = {};
+-- MAGIC                 showResults = false;
+-- MAGIC                 render();
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         if (resetBtn) {
+-- MAGIC             resetBtn.addEventListener('click', function() {
+-- MAGIC                 if (showResults && currentChallenge === challenges.length - 1) {
+-- MAGIC                     init();
+-- MAGIC                 } else {
+-- MAGIC                     selections = {};
+-- MAGIC                     showResults = false;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         }
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 2: Oracle to Databricks Datatype Mapping
+-- MAGIC
+-- MAGIC Drag each Oracle datatype on the left to its Databricks equivalent on the right.
+-- MAGIC
+-- MAGIC <div id="datatypeMatchRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var concepts = [
+-- MAGIC         ["VARCHAR2(n)", "STRING", "Character data"],
+-- MAGIC         ["NUMBER(p,s)", "DECIMAL(p,s)", "Exact numeric with precision/scale"],
+-- MAGIC         ["NUMBER(38,0)", "BIGINT", "Large scale integer"],
+-- MAGIC         ["FLOAT", "FLOAT or DOUBLE", "Floating point number"],
+-- MAGIC         ["DATE", "TIMESTAMP", "Oracle DATE contains time"],
+-- MAGIC         ["BLOB", "BINARY", "Binary object"],
+-- MAGIC         ["INTEGER", "INTEGER", "Direct mapping"],
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var matchedPairs = {};
+-- MAGIC     var draggedKey = null;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countMatched() {
+-- MAGIC         return Object.keys(matchedPairs).length;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('datatypeMatchRoot');
+-- MAGIC         var shuffledSources = shuffleArray(concepts);
+-- MAGIC         var shuffledTargets = shuffleArray(concepts);
+-- MAGIC         
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f9f9f9; border-radius: 12px; border: 1px solid #ddd; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">🎯 Drag & Drop: Datatype Mapping</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 15px;">';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e8f5e9; color: #2e7d32;">✓ Matched: ' + countMatched() + '</span>';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e3f2fd; color: #1565c0;">○ Remaining: ' + (concepts.length - countMatched()) + '</span>';
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 40px; width: 100%;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%); color: #00838f; text-align: center; margin-bottom: 12px;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="18" height="18" style="vertical-align: middle; margin-right: 8px;" />Oracle Datatype</div>';
+-- MAGIC         
+-- MAGIC         shuffledSources.forEach(function(src) {
+-- MAGIC             var srcKey = src[0];
+-- MAGIC             var isSourceMatched = matchedPairs[srcKey] !== undefined;
+-- MAGIC             
+-- MAGIC             var srcBg = isSourceMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var srcBorder = isSourceMatched ? '#4caf50' : '#29B5E8';
+-- MAGIC             var srcCursor = isSourceMatched ? 'default' : 'grab';
+-- MAGIC             var srcOpacity = isSourceMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div draggable="' + (!isSourceMatched) + '" data-key="' + srcKey + '" class="drag-source-dt" style="padding: 12px 16px; margin-bottom: 6px; background: ' + srcBg + '; border: 2px solid ' + srcBorder + '; border-radius: 8px; cursor: ' + srcCursor + '; font-size: 0.9em; color: #333; opacity: ' + srcOpacity + '; transition: all 0.15s ease;">' + srcKey + '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%); color: #c62828; text-align: center; margin-bottom: 12px;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="18" height="18" style="vertical-align: middle; margin-right: 8px;"/>Databricks Equivalent</div>';
+-- MAGIC         
+-- MAGIC         shuffledTargets.forEach(function(tgt) {
+-- MAGIC             var tgtAnswer = tgt[0];
+-- MAGIC             var tgtLabel = tgt[1];
+-- MAGIC             var tgtHint = tgt[2];
+-- MAGIC             var isTargetMatched = false;
+-- MAGIC             
+-- MAGIC             for (var key in matchedPairs) {
+-- MAGIC                 if (matchedPairs[key] === tgtAnswer) {
+-- MAGIC                     isTargetMatched = true;
+-- MAGIC                     break;
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             var tgtBg = isTargetMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var tgtBorder = isTargetMatched ? '#4caf50' : '#FF3621';
+-- MAGIC             var tgtOpacity = isTargetMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div class="drop-target-dt" data-answer="' + tgtAnswer + '" title="' + tgtHint + '" style="padding: 12px 16px; margin-bottom: 6px; background: ' + tgtBg + '; border: 2px dashed ' + tgtBorder + '; border-radius: 8px; font-size: 0.9em; color: #333; opacity: ' + tgtOpacity + '; transition: all 0.15s ease; min-height: 20px;">';
+-- MAGIC             if (isTargetMatched) {
+-- MAGIC                 html += '<span style="color: #2e7d32; font-weight: 600;">✓ </span>';
+-- MAGIC             }
+-- MAGIC             html += tgtLabel;
+-- MAGIC             html += '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (countMatched() === concepts.length) {
+-- MAGIC             html += '<div style="margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 2px solid #4caf50; border-radius: 12px; text-align: center;">';
+-- MAGIC             html += '<div style="font-size: 2em; margin-bottom: 8px;">🎉</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; font-weight: 600; color: #2e7d32;">All Datatypes Mapped!</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 20px; padding-top: 16px; border-top: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<button id="resetDtBtn" style="padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sources = document.querySelectorAll('.drag-source-dt');
+-- MAGIC         var targets = document.querySelectorAll('.drop-target-dt');
+-- MAGIC         var resetBtn = document.getElementById('resetDtBtn');
+-- MAGIC         
+-- MAGIC         sources.forEach(function(src) {
+-- MAGIC             src.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedKey = this.dataset.key;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             src.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedKey = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         targets.forEach(function(tgt) {
+-- MAGIC             tgt.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff3e0';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('dragleave', function() {
+-- MAGIC                 var isMatched = false;
+-- MAGIC                 for (var key in matchedPairs) {
+-- MAGIC                     if (matchedPairs[key] === this.dataset.answer) {
+-- MAGIC                         isMatched = true;
+-- MAGIC                         break;
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC                 this.style.background = isMatched ? '#e8f5e9' : 'white';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedKey) {
+-- MAGIC                     var correctAnswer = draggedKey;
+-- MAGIC                     var targetAnswer = this.dataset.answer;
+-- MAGIC                     
+-- MAGIC                     if (correctAnswer === targetAnswer) {
+-- MAGIC                         matchedPairs[draggedKey] = targetAnswer;
+-- MAGIC                         render();
+-- MAGIC                     } else {
+-- MAGIC                         this.style.background = '#ffebee';
+-- MAGIC                         this.style.borderColor = '#f44336';
+-- MAGIC                         var self = this;
+-- MAGIC                         setTimeout(function() {
+-- MAGIC                             self.style.background = 'white';
+-- MAGIC                             self.style.borderColor = '#FF3621';
+-- MAGIC                         }, 800);
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             matchedPairs = {};
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Data Migration and Ingestion
+-- MAGIC
+-- MAGIC In this lesson, you learned about migration patterns including `COPY INTO` exports, Auto Loader ingestion, the Spark JDBC Connector, and Lakehouse Federation.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 3: Data Migration Using Lakehouse Federation
+-- MAGIC
+-- MAGIC For small tables, we might decide to migrate the data through Lakehouse Federation.
+-- MAGIC Drag and drop to arrange the steps in the correct order for implementing a migration through Lakehouse Federation.
+-- MAGIC
+-- MAGIC <div id="sharedStorageSeqRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var phases = [
+-- MAGIC         { id: "create_user", label: "Create Oracle User", desc: "Create the Oracle user that will be used for migration" },
+-- MAGIC         { id: "create_connection", label: "Create Unity Catalog Connection", desc: "Create a Unity Catalog connection to Oracle" },
+-- MAGIC         { id: "create_catalog", label: "Create A Catalog in Unity Catalog", desc: "Create a catalog in Unity Catalog using the connection" },
+-- MAGIC         { id: "read_data", label: "Read Data from Federated Catalog", desc: "Use CREATE TABLE AS SELECT to migrate data into Databricks" },
+-- MAGIC         { id: "give_permission", label: "Give CREATE SESSION Permission", desc: "Grant CREATE SESSION permission to the Oracle user" }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var correctOrder = ["create_user", "give_permission", "create_connection", "create_catalog", "read_data"];
+-- MAGIC     var currentOrder = [];
+-- MAGIC     var showResult = false;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function init() {
+-- MAGIC         currentOrder = shuffleArray(phases.map(function(p) { return p.id; }));
+-- MAGIC         showResult = false;
+-- MAGIC         render();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function checkOrder() {
+-- MAGIC         for (var i = 0; i < correctOrder.length; i++) {
+-- MAGIC             if (currentOrder[i] !== correctOrder[i]) return false;
+-- MAGIC         }
+-- MAGIC         return true;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function getPhaseById(id) {
+-- MAGIC         for (var i = 0; i < phases.length; i++) {
+-- MAGIC             if (phases[i].id === id) return phases[i];
+-- MAGIC         }
+-- MAGIC         return null;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('sharedStorageSeqRoot');
+-- MAGIC         var isComplete = checkOrder();
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
+-- MAGIC         html += '<div>';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">🔢 Sequence: Federation Steps</div>';
+-- MAGIC         html += '<div style="font-size: 0.95em; color: #666; margin-top: 4px;">Drag and drop to arrange in the correct order</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         if (showResult && isComplete) {
+-- MAGIC             html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e8f5e9; color: #2e7d32;">✓ Correct!</span>';
+-- MAGIC         } else if (showResult && !isComplete) {
+-- MAGIC             html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #ffebee; color: #c62828;">✗ Try Again</span>';
+-- MAGIC         }
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div id="sequenceListStorage" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">';
+-- MAGIC         
+-- MAGIC         currentOrder.forEach(function(id, index) {
+-- MAGIC             var phase = getPhaseById(id);
+-- MAGIC             var bgColor = '#fff';
+-- MAGIC             var borderColor = '#1976d2';
+-- MAGIC             
+-- MAGIC             if (showResult) {
+-- MAGIC                 if (correctOrder[index] === id) {
+-- MAGIC                     bgColor = '#e8f5e9';
+-- MAGIC                     borderColor = '#4caf50';
+-- MAGIC                 } else {
+-- MAGIC                     bgColor = '#ffebee';
+-- MAGIC                     borderColor = '#f44336';
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             html += '<div class="seq-item-storage" draggable="true" data-id="' + id + '" style="display: flex; align-items: center; gap: 16px; padding: 14px 18px; background: ' + bgColor + '; border: 2px solid ' + borderColor + '; border-radius: 8px; cursor: grab; transition: all 0.2s ease;">';
+-- MAGIC             html += '<div style="width: 28px; height: 28px; background: ' + borderColor + '; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9em;">' + (index + 1) + '</div>';
+-- MAGIC             html += '<div style="flex: 1;">';
+-- MAGIC             html += '<div style="font-weight: 600; font-size: 0.95em; color: #333;">' + phase.label + '</div>';
+-- MAGIC             html += '<div style="font-size: 0.8em; color: #666; margin-top: 2px;">' + phase.desc + '</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC             html += '<div style="color: #aaa; font-size: 1.2em;">⋮⋮</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end;">';
+-- MAGIC         html += '<button id="checkStorageBtn" style="padding: 12px 28px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">Check Order</button>';
+-- MAGIC         html += '<button id="resetStorageBtn" style="padding: 12px 28px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var items = document.querySelectorAll('.seq-item-storage');
+-- MAGIC         var checkBtn = document.getElementById('checkStorageBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetStorageBtn');
+-- MAGIC         var draggedItem = null;
+-- MAGIC         
+-- MAGIC         items.forEach(function(item) {
+-- MAGIC             item.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedItem = this;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedItem = null;
+-- MAGIC                 items.forEach(function(it) { it.style.borderTop = ''; });
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 if (this !== draggedItem) {
+-- MAGIC                     this.style.borderTop = '3px solid #ff9800';
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('dragleave', function() {
+-- MAGIC                 this.style.borderTop = '';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             item.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderTop = '';
+-- MAGIC                 
+-- MAGIC                 if (draggedItem && this !== draggedItem) {
+-- MAGIC                     var draggedId = draggedItem.dataset.id;
+-- MAGIC                     var targetId = this.dataset.id;
+-- MAGIC                     
+-- MAGIC                     var draggedIdx = currentOrder.indexOf(draggedId);
+-- MAGIC                     var targetIdx = currentOrder.indexOf(targetId);
+-- MAGIC                     
+-- MAGIC                     currentOrder.splice(draggedIdx, 1);
+-- MAGIC                     currentOrder.splice(targetIdx, 0, draggedId);
+-- MAGIC                     
+-- MAGIC                     showResult = false;
+-- MAGIC                     render();
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         checkBtn.addEventListener('click', function() {
+-- MAGIC             showResult = true;
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             init();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     init();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 4: Load Data Using COPY INTO
+-- MAGIC
+-- MAGIC Use Databricks `COPY INTO` to load the **employees** table from the landing zone into a bronze table in your schema. The landing zone contains Parquet files exported from Oracle.
+-- MAGIC
+-- MAGIC **Requirements:**
+-- MAGIC - Create a table named `employees` in the `lab_3` schema in your personal catalog
+-- MAGIC - The parquet file is in `/Volumes/your-personal-catalog-name/lab_3/employees_landing/employees.parquet`
+-- MAGIC - Use `COPY INTO` to load from the landing zone volume
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Use COPY INTO to load from a shared location (SQL)
+-- Replace <FILL_IN> with the appropriate SQL syntax
+-- Landing zone path is /Volumes/your-personal-catalog/lab_3/employees_landing/employees.parquet
+
+-- First, create an empty table
+CREATE TABLE IF NOT EXISTS employees;
+
+-- Now use COPY INTO to load the data
+<FILL_IN>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">📖 Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Create an empty table
+-- MAGIC CREATE TABLE IF NOT EXISTS employees;
+-- MAGIC <br/>
+-- MAGIC -- Use COPY INTO to load the data
+-- MAGIC COPY INTO employees
+-- MAGIC FROM '/Volumes/labuser_bence_toth/lab_3/employees_landing/employees.parquet'
+-- MAGIC FILEFORMAT = PARQUET
+-- MAGIC COPY_OPTIONS ('mergeSchema' = 'true');
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Check your work (Python)
+-- MAGIC %python
+-- MAGIC # Check your work: Verify the employees table was created and loaded
+-- MAGIC lab_catalog = spark.sql("SELECT my_catalog").collect()[0][0]
+-- MAGIC
+-- MAGIC # Check table exists
+-- MAGIC table_exists = spark.sql(f"""
+-- MAGIC SELECT COUNT(*) as tbl_count
+-- MAGIC FROM {lab_catalog}.information_schema.tables
+-- MAGIC WHERE table_schema = 'lab_3' AND table_name = 'employees'
+-- MAGIC """).collect()[0][0]
+-- MAGIC
+-- MAGIC assert table_exists == 1, f"Table 'employees' not found in {lab_catalog}.lab_3"
+-- MAGIC
+-- MAGIC # Check row count
+-- MAGIC row_count = spark.sql(f"SELECT COUNT(*) FROM {lab_catalog}.lab_3.employees").collect()[0][0]
+-- MAGIC assert row_count > 0, "Table 'employees' is empty - COPY INTO may not have run correctly"
+-- MAGIC
+-- MAGIC print(f"✅ Table 'employees' created and loaded successfully")
+-- MAGIC print(f"   - Row count: {row_count:,}")
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Exercise 5: Apply Liquid Clustering
+-- MAGIC
+-- MAGIC Apply Liquid Clustering to the `employees` table to optimize query performance. Choose appropriate clustering columns based on common query patterns (filtering by `job_id` and `department_id`).
+-- MAGIC
+-- MAGIC **Requirements:**
+-- MAGIC - Use `ALTER TABLE ... CLUSTER BY` syntax
+-- MAGIC - Cluster by columns that would be commonly used in `WHERE` clauses
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Apply Liquid Clustering to a table (SQL)
+-- Replace <FILL_IN> with the appropriate SQL syntax
+
+<FILL_IN>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">📖 Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC ALTER TABLE employees
+-- MAGIC CLUSTER BY (job_id, department_id);
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Check your work (Python)
+-- MAGIC %python
+-- MAGIC # Check your work: Verify Liquid Clustering was applied
+-- MAGIC lab_catalog = spark.sql("SELECT my_catalog").collect()[0][0]
+-- MAGIC
+-- MAGIC # Check for clustering columns in table properties
+-- MAGIC result = spark.sql(f"DESCRIBE DETAIL {lab_catalog}.lab_3.employees").collect()[0]
+-- MAGIC clustering_cols = result['clusteringColumns']
+-- MAGIC
+-- MAGIC assert clustering_cols is not None and len(clustering_cols) > 0, "Liquid Clustering not applied - no clustering columns found"
+-- MAGIC
+-- MAGIC print(f"✅ Liquid Clustering applied successfully")
+-- MAGIC print(f"   - Clustering columns: {clustering_cols}")
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Incremental Sync and CDC
+-- MAGIC
+-- MAGIC In this lesson, you learned how to implement Change Data Capture (CDC) patterns to keep Databricks tables synchronized with source changes, including Delta `MERGE` for upserts and `AUTO CDC INTO` for SCD handling in Lakeflow SDP pipelines.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 6: CDC Concept Mapping
+-- MAGIC
+-- MAGIC Drag each Oracle CDC concept on the left to its Databricks equivalent on the right.
+-- MAGIC
+-- MAGIC <div id="cdcMatchRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var concepts = [
+-- MAGIC         ["MV Logs", "Change Data Feed / Streaming Table", "Captures row-level changes (INSERT, UPDATE, DELETE)"],
+-- MAGIC         ["Triggers / CDC Logic", "Lakeflow Job / SDP Pipeline", "Schedules and orchestrates CDC processing"],
+-- MAGIC         ["MERGE INTO", "MERGE INTO", "Applies changes to target table"],
+-- MAGIC         ["Operation flags", "_change_type", "Identifies operation type (insert/update/delete)"],
+-- MAGIC         ["Transaction SCN", "SEQUENCE BY", "Sorts DML events"]
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var matchedPairs = {};
+-- MAGIC     var draggedKey = null;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countMatched() {
+-- MAGIC         return Object.keys(matchedPairs).length;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('cdcMatchRoot');
+-- MAGIC         var shuffledSources = shuffleArray(concepts);
+-- MAGIC         var shuffledTargets = shuffleArray(concepts);
+-- MAGIC         
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f9f9f9; border-radius: 12px; border: 1px solid #ddd; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">🎯 Drag & Drop: CDC Concept Mapping</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 15px;">';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e8f5e9; color: #2e7d32;">✓ Matched: ' + countMatched() + '</span>';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e3f2fd; color: #1565c0;">○ Remaining: ' + (concepts.length - countMatched()) + '</span>';
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 40px; width: 100%;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%); color: #00838f; text-align: center; margin-bottom: 12px;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="18" height="18" style="vertical-align: middle; margin-right: 8px;" />Oracle CDC</div>';
+-- MAGIC         
+-- MAGIC         shuffledSources.forEach(function(src) {
+-- MAGIC             var srcKey = src[0];
+-- MAGIC             var isSourceMatched = matchedPairs[srcKey] !== undefined;
+-- MAGIC             
+-- MAGIC             var srcBg = isSourceMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var srcBorder = isSourceMatched ? '#4caf50' : '#29B5E8';
+-- MAGIC             var srcCursor = isSourceMatched ? 'default' : 'grab';
+-- MAGIC             var srcOpacity = isSourceMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div draggable="' + (!isSourceMatched) + '" data-key="' + srcKey + '" class="drag-source-cdc" style="padding: 14px 20px; margin-bottom: 8px; background: ' + srcBg + '; border: 2px solid ' + srcBorder + '; border-radius: 8px; cursor: ' + srcCursor + '; font-size: 0.95em; color: #333; opacity: ' + srcOpacity + '; transition: all 0.15s ease;">' + srcKey + '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%); color: #c62828; text-align: center; margin-bottom: 12px;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="18" height="18" style="vertical-align: middle; margin-right: 8px;"/>Databricks CDC</div>';
+-- MAGIC         
+-- MAGIC         shuffledTargets.forEach(function(tgt) {
+-- MAGIC             var tgtAnswer = tgt[0];
+-- MAGIC             var tgtLabel = tgt[1];
+-- MAGIC             var tgtHint = tgt[2];
+-- MAGIC             var isTargetMatched = false;
+-- MAGIC             
+-- MAGIC             for (var key in matchedPairs) {
+-- MAGIC                 if (matchedPairs[key] === tgtAnswer) {
+-- MAGIC                     isTargetMatched = true;
+-- MAGIC                     break;
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             var tgtBg = isTargetMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var tgtBorder = isTargetMatched ? '#4caf50' : '#FF3621';
+-- MAGIC             var tgtOpacity = isTargetMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div class="drop-target-cdc" data-answer="' + tgtAnswer + '" title="' + tgtHint + '" style="padding: 14px 20px; margin-bottom: 8px; background: ' + tgtBg + '; border: 2px dashed ' + tgtBorder + '; border-radius: 8px; font-size: 0.95em; color: #333; opacity: ' + tgtOpacity + '; transition: all 0.15s ease; min-height: 24px;">';
+-- MAGIC             if (isTargetMatched) {
+-- MAGIC                 html += '<span style="color: #2e7d32; font-weight: 600;">✓ </span>';
+-- MAGIC             }
+-- MAGIC             html += tgtLabel;
+-- MAGIC             html += '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (countMatched() === concepts.length) {
+-- MAGIC             html += '<div style="margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 2px solid #4caf50; border-radius: 12px; text-align: center;">';
+-- MAGIC             html += '<div style="font-size: 2em; margin-bottom: 8px;">🎉</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; font-weight: 600; color: #2e7d32;">All CDC Concepts Mapped!</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 20px; padding-top: 16px; border-top: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<button id="resetCdcBtn" style="padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sources = document.querySelectorAll('.drag-source-cdc');
+-- MAGIC         var targets = document.querySelectorAll('.drop-target-cdc');
+-- MAGIC         var resetBtn = document.getElementById('resetCdcBtn');
+-- MAGIC         
+-- MAGIC         sources.forEach(function(src) {
+-- MAGIC             src.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedKey = this.dataset.key;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             src.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedKey = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         targets.forEach(function(tgt) {
+-- MAGIC             tgt.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff3e0';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('dragleave', function() {
+-- MAGIC                 var isMatched = false;
+-- MAGIC                 for (var key in matchedPairs) {
+-- MAGIC                     if (matchedPairs[key] === this.dataset.answer) {
+-- MAGIC                         isMatched = true;
+-- MAGIC                         break;
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC                 this.style.background = isMatched ? '#e8f5e9' : 'white';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedKey) {
+-- MAGIC                     var correctAnswer = draggedKey;
+-- MAGIC                     var targetAnswer = this.dataset.answer;
+-- MAGIC                     
+-- MAGIC                     if (correctAnswer === targetAnswer) {
+-- MAGIC                         matchedPairs[draggedKey] = targetAnswer;
+-- MAGIC                         render();
+-- MAGIC                     } else {
+-- MAGIC                         this.style.background = '#ffebee';
+-- MAGIC                         this.style.borderColor = '#f44336';
+-- MAGIC                         var self = this;
+-- MAGIC                         setTimeout(function() {
+-- MAGIC                             self.style.background = 'white';
+-- MAGIC                             self.style.borderColor = '#FF3621';
+-- MAGIC                         }, 800);
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             matchedPairs = {};
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 7: Lakeflow SDP CDC Pipeline Syntax
+-- MAGIC
+-- MAGIC Complete the Lakeflow SDP pipeline SQL by filling in the blanks. This pipeline implements SCD Type 2 history tracking for a job information dimension table.
+-- MAGIC
+-- MAGIC <div id="cdcPipelineRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     var codeTemplate = [
+-- MAGIC         "CREATE OR REFRESH STREAMING TABLE job_dim_history;",
+-- MAGIC         "",
+-- MAGIC         "CREATE FLOW job_history_flow",
+-- MAGIC         "AS {blank1} INTO job_dim_history",
+-- MAGIC         "FROM STREAM(harmonized.job_cdc)",
+-- MAGIC         "{blank2} (job_id)",
+-- MAGIC         "APPLY AS DELETE WHEN _operation = '{blank3}'",
+-- MAGIC         "{blank4} BY _sequence_num",
+-- MAGIC         "COLUMNS * EXCEPT (_operation, _sequence_num)",
+-- MAGIC         "STORED AS SCD TYPE {blank5};"
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var blanks = [
+-- MAGIC         { id: "blank1", correct: "AUTO CDC", options: ["AUTO CDC", "MERGE", "INSERT", "UPSERT"] },
+-- MAGIC         { id: "blank2", correct: "KEYS", options: ["KEYS", "PRIMARY KEY", "MATCH ON", "JOIN ON"] },
+-- MAGIC         { id: "blank3", correct: "DELETE", options: ["DELETE", "REMOVE", "DROP", "TRUNCATE"] },
+-- MAGIC         { id: "blank4", correct: "SEQUENCE", options: ["SEQUENCE", "ORDER", "SORT", "RANK"] },
+-- MAGIC         { id: "blank5", correct: "2", options: ["2", "1", "3", "0"] }
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var answers = {};
+-- MAGIC     var submitted = false;
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('cdcPipelineRoot');
+-- MAGIC         
+-- MAGIC         var html = '';
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f5f7fa; border-radius: 12px; border: 1px solid #e0e0e0; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-size: 1.2em; font-weight: 600; color: #333; margin-bottom: 16px;">📝 Complete the Lakeflow SDP CDC Pipeline</div>';
+-- MAGIC         
+-- MAGIC         html += '<pre style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; font-family: Consolas, Monaco, monospace; font-size: 14px; line-height: 1.6;">';
+-- MAGIC         
+-- MAGIC         codeTemplate.forEach(function(line) {
+-- MAGIC             var processedLine = line;
+-- MAGIC             blanks.forEach(function(blank) {
+-- MAGIC                 var placeholder = '{' + blank.id + '}';
+-- MAGIC                 if (processedLine.indexOf(placeholder) !== -1) {
+-- MAGIC                     var selectedValue = answers[blank.id] || '';
+-- MAGIC                     var selectHtml = '<select data-blank="' + blank.id + '" style="background: #2d2d2d; color: #569cd6; border: 1px solid #569cd6; border-radius: 4px; padding: 2px 8px; font-family: Consolas, Monaco, monospace; font-size: 14px;">';
+-- MAGIC                     selectHtml += '<option value="">-- select --</option>';
+-- MAGIC                     blank.options.forEach(function(opt) {
+-- MAGIC                         var selected = selectedValue === opt ? ' selected' : '';
+-- MAGIC                         selectHtml += '<option value="' + opt + '"' + selected + '>' + opt + '</option>';
+-- MAGIC                     });
+-- MAGIC                     selectHtml += '</select>';
+-- MAGIC                     processedLine = processedLine.replace(placeholder, selectHtml);
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             // Syntax highlighting
+-- MAGIC             processedLine = processedLine.replace(/(CREATE|OR|REFRESH|STREAMING|TABLE|FLOW|AS|FROM|STREAM|APPLY|WHEN|COLUMNS|EXCEPT|STORED|TYPE)/g, '<span style="color: #569cd6;">$1</span>');
+-- MAGIC             processedLine = processedLine.replace(/(--.*)/g, '<span style="color: #6a9955;">$1</span>');
+-- MAGIC             
+-- MAGIC             html += processedLine + '\n';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</pre>';
+-- MAGIC         
+-- MAGIC         if (submitted) {
+-- MAGIC             var allCorrect = true;
+-- MAGIC             blanks.forEach(function(blank) {
+-- MAGIC                 if (answers[blank.id] !== blank.correct) allCorrect = false;
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             if (allCorrect) {
+-- MAGIC                 html += '<div style="margin-top: 16px; padding: 16px; background: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; text-align: center;">';
+-- MAGIC                 html += '<span style="font-size: 1.5em;">✅</span> <span style="font-weight: 600; color: #2e7d32;">Correct! This pipeline will track full history with SCD Type 2.</span>';
+-- MAGIC                 html += '</div>';
+-- MAGIC             } else {
+-- MAGIC                 html += '<div style="margin-top: 16px; padding: 16px; background: #ffebee; border: 2px solid #f44336; border-radius: 8px;">';
+-- MAGIC                 html += '<span style="font-size: 1.5em;">❌</span> <span style="font-weight: 600; color: #c62828;">Not quite. Check your answers.</span>';
+-- MAGIC                 html += '</div>';
+-- MAGIC             }
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; padding-top: 16px; border-top: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<button id="checkCdcBtn" style="padding: 10px 24px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">Check Answer</button>';
+-- MAGIC         html += '<button id="resetCdcPipelineBtn" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">↻ Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var selects = document.querySelectorAll('select[data-blank]');
+-- MAGIC         var checkBtn = document.getElementById('checkCdcBtn');
+-- MAGIC         var resetBtn = document.getElementById('resetCdcPipelineBtn');
+-- MAGIC         
+-- MAGIC         selects.forEach(function(sel) {
+-- MAGIC             sel.addEventListener('change', function() {
+-- MAGIC                 answers[this.dataset.blank] = this.value;
+-- MAGIC                 submitted = false;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         checkBtn.addEventListener('click', function() {
+-- MAGIC             submitted = true;
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             answers = {};
+-- MAGIC             submitted = false;
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## SQL and Code Conversion
+-- MAGIC
+-- MAGIC In this lesson, you learned how to translate Oracle SQL functions to Databricks equivalents, including date/time functions, string functions, aggregate patterns, and handling Oracle-specific functions, as well.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ### Exercise 8: Convert `TRUNC`
+-- MAGIC
+-- MAGIC The following Oracle query shows how many employees were hired on a monthly basis. Write and run the equivalent query in Databricks SQL.
+-- MAGIC
+-- MAGIC **Oracle Query:**
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Find monthly hire statistics
+-- MAGIC SELECT
+-- MAGIC   TRUNC(HIRE_DATE, 'MM') AS MONTH,
+-- MAGIC   COUNT(*) AS EMPLOYEE_COUNT
+-- MAGIC FROM HR.EMPLOYEES
+-- MAGIC GROUP BY TRUNC(HIRE_DATE, 'MM')
+-- MAGIC ORDER BY EMPLOYEE_COUNT DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC **Your Task:** Convert this to Databricks SQL and run it against the `employees` table in your schema.
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC         if (block.getAttribute('data-processed')) return;
+-- MAGIC         block.setAttribute('data-processed', 'true');
+-- MAGIC         var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC         var code = block.textContent.trim();
+-- MAGIC         var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC         block.innerHTML = 
+-- MAGIC             '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>';
+-- MAGIC         var codeEl = document.getElementById(id);
+-- MAGIC         codeEl.textContent = code;
+-- MAGIC         Prism.highlightElement(codeEl);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Convert Oracle TRUNC to Databricks (SQL)
+-- Replace <FILL_IN> with the Databricks equivalent of TRUNC(HIRE_DATE, 'MM')
+
+SELECT 
+  <FILL_IN> AS month,
+  count(*) AS employee_count
+FROM employees
+GROUP BY month
+ORDER BY employee_count DESC;
+
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC <details>
+-- MAGIC <summary style="cursor: pointer; font-weight: 600; color: #1976d2; padding: 10px; background: #e3f2fd; border-radius: 6px; margin: 10px 0;">📖 Click to reveal solution</summary>
+-- MAGIC
+-- MAGIC <div class="code-block" data-language="sql">
+-- MAGIC -- Databricks equivalent of TRUNC
+-- MAGIC SELECT 
+-- MAGIC   DATE_TRUNC('month', hire_date) AS month,
+-- MAGIC   count(*) AS employee_count
+-- MAGIC FROM employees
+-- MAGIC GROUP BY month
+-- MAGIC ORDER BY employee_count DESC;
+-- MAGIC </div>
+-- MAGIC
+-- MAGIC </details>
+-- MAGIC
+-- MAGIC <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+-- MAGIC <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     function processCodeBlocks() {
+-- MAGIC         document.querySelectorAll('.code-block').forEach(function(block) {
+-- MAGIC             if (block.getAttribute('data-processed')) return;
+-- MAGIC             block.setAttribute('data-processed', 'true');
+-- MAGIC             var lang = block.getAttribute('data-language') || 'sql';
+-- MAGIC             var code = block.textContent.trim();
+-- MAGIC             var id = 'code-' + Math.random().toString(36).substr(2, 9);
+-- MAGIC             block.innerHTML = 
+-- MAGIC                 '<div style="position:relative;margin:16px 0;">' +
+-- MAGIC                     '<button class="copy-btn" style="position:absolute;top:8px;right:8px;padding:4px 12px;font-size:12px;background:#ddd;color:#333;border:1px solid #ccc;border-radius:4px;cursor:pointer;z-index:10;">Copy</button>' +
+-- MAGIC                     '<pre style="background:#f8f8f8;border-radius:8px;padding:16px;padding-top:40px;overflow-x:auto;margin:0;border:1px solid #e0e0e0;"><code id="' + id + '" class="language-' + lang + '" style="font-family:Consolas,Monaco,monospace;font-size:14px;"></code></pre>' +
+-- MAGIC                 '</div>';
+-- MAGIC             var codeEl = document.getElementById(id);
+-- MAGIC             codeEl.textContent = code;
+-- MAGIC             Prism.highlightElement(codeEl);
+-- MAGIC             block.querySelector('.copy-btn').onclick = function() {
+-- MAGIC                 var t = document.createElement('textarea');
+-- MAGIC                 t.value = code;
+-- MAGIC                 document.body.appendChild(t);
+-- MAGIC                 t.select();
+-- MAGIC                 document.execCommand('copy');
+-- MAGIC                 document.body.removeChild(t);
+-- MAGIC                 this.textContent = '✓ Copied!';
+-- MAGIC                 setTimeout(function() { this.textContent = 'Copy'; }.bind(this), 2000);
+-- MAGIC             };
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     processCodeBlocks();
+-- MAGIC     document.querySelectorAll('details').forEach(function(details) {
+-- MAGIC         details.addEventListener('toggle', processCodeBlocks);
+-- MAGIC     });
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Pipeline and Orchestration
+-- MAGIC
+-- MAGIC In this lesson, you learned how to convert Oracle orchestration patterns to Databricks using Lakeflow Jobs, including schedules, dependencies, and deployment using Declarative Automation Bundles.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC            
+-- MAGIC ### Exercise 9: Pipeline and Orchestration Concept Mapping
+-- MAGIC
+-- MAGIC Drag each Oracle orchestration concept on the left to its Databricks equivalent on the right.
+-- MAGIC
+-- MAGIC <div id="orchMatchRoot"></div>
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC (function() {
+-- MAGIC     // Oracle to Databricks orchestration concept pairs (aligned with 3.5 Lecture)
+-- MAGIC     var concepts = [
+-- MAGIC         ["DBMS_SCHEDULER.CREATE_JOB", "Lakeflow Job Task", "Schedules execution of PL/SQL, stored procedures, or executables"],
+-- MAGIC         ["DBMS_SCHEDULER.CREATE_CHAIN", "Lakeflow Job", "Workflow container; chain steps with dependency rules"],
+-- MAGIC         ["Chain Rules (DEFINE_CHAIN_RULE)", "depends_on in job tasks", "Defines execution order and conditions between steps"],
+-- MAGIC         ["repeat_interval (Calendar syntax)", "quartz_cron_expression (6 fields, includes seconds)", "Time-based scheduling"],
+-- MAGIC         ["Database Change Notification (DCN)", "File arrival trigger or continuous Pipeline", "Event trigger when table data changes"],
+-- MAGIC         ["Database Instance / RAC", "Job Cluster / SQL Warehouse", "Compute binding for job execution"],
+-- MAGIC         ["max_runs / max_failures", "max_concurrent_runs / max_retries", "Controls concurrent runs and failure handling"],
+-- MAGIC         ["PL/SQL Stored Procedure", "Notebook / Python Script / SQL File", "Business logic container"],
+-- MAGIC         ["DBA_SCHEDULER_JOB_RUN_DETAILS", "system.lakeflow.job_runs", "Monitoring and run history"]
+-- MAGIC     ];
+-- MAGIC     
+-- MAGIC     var matchedPairs = {};
+-- MAGIC     var draggedKey = null;
+-- MAGIC     
+-- MAGIC     function shuffleArray(array) {
+-- MAGIC         var shuffled = array.slice();
+-- MAGIC         for (var i = shuffled.length - 1; i > 0; i--) {
+-- MAGIC             var j = Math.floor(Math.random() * (i + 1));
+-- MAGIC             var temp = shuffled[i];
+-- MAGIC             shuffled[i] = shuffled[j];
+-- MAGIC             shuffled[j] = temp;
+-- MAGIC         }
+-- MAGIC         return shuffled;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function countMatched() {
+-- MAGIC         return Object.keys(matchedPairs).length;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function render() {
+-- MAGIC         var root = document.getElementById('orchMatchRoot');
+-- MAGIC         var shuffledSources = shuffleArray(concepts);
+-- MAGIC         var shuffledTargets = shuffleArray(concepts);
+-- MAGIC         
+-- MAGIC         var html = '';
+-- MAGIC         
+-- MAGIC         html += '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; width: 100%; margin: 10px 0; padding: 24px; background: #f9f9f9; border-radius: 12px; border: 1px solid #ddd; box-sizing: border-box;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<div style="font-size: 1.3em; font-weight: 600; color: #333;">\uD83C\uDFAF Drag & Drop: Orchestration Mapping</div>';
+-- MAGIC         html += '<div style="display: flex; gap: 15px;">';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e8f5e9; color: #2e7d32;">\u2713 Matched: ' + countMatched() + '</span>';
+-- MAGIC         html += '<span style="padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 0.95em; background: #e3f2fd; color: #1565c0;">\u25CB Remaining: ' + (concepts.length - countMatched()) + '</span>';
+-- MAGIC         html += '</div></div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="display: flex; gap: 40px; width: 100%;">';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%); color: #00838f; text-align: center; margin-bottom: 12px;"><img src="https://api.iconify.design/simple-icons:oracle.svg?color=%23F80102" width="18" height="18" style="vertical-align: middle; margin-right: 8px;" />Oracle Orchestration</div>';
+-- MAGIC         
+-- MAGIC         shuffledSources.forEach(function(src) {
+-- MAGIC             var srcKey = src[0];
+-- MAGIC             var isSourceMatched = matchedPairs[srcKey] !== undefined;
+-- MAGIC             
+-- MAGIC             var srcBg = isSourceMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var srcBorder = isSourceMatched ? '#4caf50' : '#29B5E8';
+-- MAGIC             var srcCursor = isSourceMatched ? 'default' : 'grab';
+-- MAGIC             var srcOpacity = isSourceMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div draggable="' + (!isSourceMatched) + '" data-key="' + srcKey + '" class="drag-source-orch" style="padding: 12px 16px; margin-bottom: 6px; background: ' + srcBg + '; border: 2px solid ' + srcBorder + '; border-radius: 8px; cursor: ' + srcCursor + '; font-size: 0.9em; color: #333; opacity: ' + srcOpacity + '; transition: all 0.15s ease;">' + srcKey + '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '<div style="flex: 1;">';
+-- MAGIC         html += '<div style="padding: 14px 20px; border-radius: 8px; font-weight: 600; font-size: 1.05em; background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%); color: #c62828; text-align: center; margin-bottom: 12px;"><img src="https://cdn.simpleicons.org/databricks/FF3621" width="18" height="18" style="vertical-align: middle; margin-right: 8px;"/>Databricks Equivalent</div>';
+-- MAGIC         
+-- MAGIC         shuffledTargets.forEach(function(tgt) {
+-- MAGIC             var tgtAnswer = tgt[0];
+-- MAGIC             var tgtLabel = tgt[1];
+-- MAGIC             var tgtHint = tgt[2];
+-- MAGIC             var isTargetMatched = false;
+-- MAGIC             
+-- MAGIC             for (var key in matchedPairs) {
+-- MAGIC                 if (matchedPairs[key] === tgtAnswer) {
+-- MAGIC                     isTargetMatched = true;
+-- MAGIC                     break;
+-- MAGIC                 }
+-- MAGIC             }
+-- MAGIC             
+-- MAGIC             var tgtBg = isTargetMatched ? '#e8f5e9' : 'white';
+-- MAGIC             var tgtBorder = isTargetMatched ? '#4caf50' : '#FF3621';
+-- MAGIC             var tgtOpacity = isTargetMatched ? '0.7' : '1';
+-- MAGIC             
+-- MAGIC             html += '<div class="drop-target-orch" data-answer="' + tgtAnswer + '" title="' + tgtHint + '" style="padding: 12px 16px; margin-bottom: 6px; background: ' + tgtBg + '; border: 2px dashed ' + tgtBorder + '; border-radius: 8px; font-size: 0.9em; color: #333; opacity: ' + tgtOpacity + '; transition: all 0.15s ease; min-height: 20px;">';
+-- MAGIC             if (isTargetMatched) {
+-- MAGIC                 html += '<span style="color: #2e7d32; font-weight: 600;">\u2713 </span>';
+-- MAGIC             }
+-- MAGIC             html += tgtLabel;
+-- MAGIC             html += '</div>';
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         if (countMatched() === concepts.length) {
+-- MAGIC             html += '<div style="margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 2px solid #4caf50; border-radius: 12px; text-align: center;">';
+-- MAGIC             html += '<div style="font-size: 2em; margin-bottom: 8px;">\uD83C\uDF89</div>';
+-- MAGIC             html += '<div style="font-size: 1.2em; font-weight: 600; color: #2e7d32;">All Orchestration Concepts Mapped!</div>';
+-- MAGIC             html += '</div>';
+-- MAGIC         }
+-- MAGIC         
+-- MAGIC         html += '<div style="margin-top: 20px; padding-top: 16px; border-top: 2px solid #e0e0e0;">';
+-- MAGIC         html += '<button id="resetOrchBtn" style="padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; font-weight: 600;">\u21BB Reset</button>';
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         html += '</div>';
+-- MAGIC         
+-- MAGIC         root.innerHTML = html;
+-- MAGIC         attachEvents();
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     function attachEvents() {
+-- MAGIC         var sources = document.querySelectorAll('.drag-source-orch');
+-- MAGIC         var targets = document.querySelectorAll('.drop-target-orch');
+-- MAGIC         var resetBtn = document.getElementById('resetOrchBtn');
+-- MAGIC         
+-- MAGIC         sources.forEach(function(src) {
+-- MAGIC             src.addEventListener('dragstart', function(e) {
+-- MAGIC                 draggedKey = this.dataset.key;
+-- MAGIC                 this.style.opacity = '0.4';
+-- MAGIC                 e.dataTransfer.effectAllowed = 'move';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             src.addEventListener('dragend', function() {
+-- MAGIC                 this.style.opacity = '1';
+-- MAGIC                 draggedKey = null;
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         targets.forEach(function(tgt) {
+-- MAGIC             tgt.addEventListener('dragover', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.background = '#fff3e0';
+-- MAGIC                 this.style.borderStyle = 'solid';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('dragleave', function() {
+-- MAGIC                 var isMatched = false;
+-- MAGIC                 for (var key in matchedPairs) {
+-- MAGIC                     if (matchedPairs[key] === this.dataset.answer) {
+-- MAGIC                         isMatched = true;
+-- MAGIC                         break;
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC                 this.style.background = isMatched ? '#e8f5e9' : 'white';
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC             });
+-- MAGIC             
+-- MAGIC             tgt.addEventListener('drop', function(e) {
+-- MAGIC                 e.preventDefault();
+-- MAGIC                 this.style.borderStyle = 'dashed';
+-- MAGIC                 
+-- MAGIC                 if (draggedKey) {
+-- MAGIC                     var correctAnswer = draggedKey;
+-- MAGIC                     var targetAnswer = this.dataset.answer;
+-- MAGIC                     
+-- MAGIC                     if (correctAnswer === targetAnswer) {
+-- MAGIC                         matchedPairs[draggedKey] = targetAnswer;
+-- MAGIC                         render();
+-- MAGIC                     } else {
+-- MAGIC                         this.style.background = '#ffebee';
+-- MAGIC                         this.style.borderColor = '#f44336';
+-- MAGIC                         var self = this;
+-- MAGIC                         setTimeout(function() {
+-- MAGIC                             self.style.background = 'white';
+-- MAGIC                             self.style.borderColor = '#FF3621';
+-- MAGIC                         }, 800);
+-- MAGIC                     }
+-- MAGIC                 }
+-- MAGIC             });
+-- MAGIC         });
+-- MAGIC         
+-- MAGIC         resetBtn.addEventListener('click', function() {
+-- MAGIC             matchedPairs = {};
+-- MAGIC             render();
+-- MAGIC         });
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     if (typeof NodeList.prototype.forEach !== 'function') {
+-- MAGIC         NodeList.prototype.forEach = Array.prototype.forEach;
+-- MAGIC     }
+-- MAGIC     
+-- MAGIC     render();
+-- MAGIC })();
+-- MAGIC </script>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 🎉 Lab Complete!
+-- MAGIC
+-- MAGIC You've completed the Execution & Data Migration Phase lab. You should now be able to:
+-- MAGIC
+-- MAGIC ✅ Write Oracle sytem view queries to extract table and column metadata  
+-- MAGIC ✅ Map Oracle datatypes to their Databricks equivalents  
+-- MAGIC ✅ Sequence the steps for implementing Lakehouse Federation  
+-- MAGIC ✅ Use `COPY INTO` to load exported data into Delta tables  
+-- MAGIC ✅ Apply Liquid Clustering for query optimization  
+-- MAGIC ✅ Map Oracle CDC concepts to Databricks equivalents  
+-- MAGIC ✅ Understand Lakeflow SDP `AUTO CDC INTO` syntax for SCD Type 2  
+-- MAGIC ✅ Convert Oracle-specific functions to Databricks SQL  
+-- MAGIC ✅ Map Oracle orchestration concepts to Lakeflow Jobs  
+-- MAGIC
+-- MAGIC **Next Steps:** Continue to the **Activate** phase to learn about data validation, observability, and cutover execution.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC &copy; <span id="dbx-year"></span> Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank" style="color: #1a5276; text-decoration: underline;">Apache Software Foundation</a>. Oracle and the Oracle logo are trademarks or registered trademarks of <a href="https://www.oracle.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Oracle Corporation.</a> All other trademarks are the property of their respective owners.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank" style="color: #1a5276; text-decoration: underline;">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank" style="color: #1a5276; text-decoration: underline;">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank" style="color: #1a5276; text-decoration: underline;">Support</a>
+-- MAGIC
+-- MAGIC <script> document.getElementById("dbx-year").textContent = new Date().getFullYear(); </script>

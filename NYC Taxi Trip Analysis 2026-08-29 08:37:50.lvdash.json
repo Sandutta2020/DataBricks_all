@@ -1,0 +1,523 @@
+{
+  "datasets": [
+    {
+      "name": "8efbd95b",
+      "displayName": "Top Five Same Zipcode Taxi Trip Summaries",
+      "queryLines": [
+        "select sum(fare_amount) total_amoint,count(*) trip_count,pickup_zip from samples.nyctaxi.trips \r\n",
+        "where pickup_zip = dropoff_zip\r\n",
+        "group by pickup_zip\r\n",
+        "order by 1 desc\r\n",
+        "limit 5;"
+      ],
+      "catalog": "samples",
+      "schema": "nyctaxi"
+    },
+    {
+      "name": "e816948b",
+      "displayName": "New York City Taxi Trips Filtered by Pickup Zip",
+      "queryLines": [
+        "select\n",
+        "  *\n",
+        "from\n",
+        "  samples.nyctaxi.trips\n",
+        "where\n",
+        "  pickup_zip = :pickup_zip\n",
+        "  and dropoff_zip = :pickup_zip\n",
+        "order by\n",
+        "  1 desc"
+      ],
+      "parameters": [
+        {
+          "displayName": "Pickup Zipcode",
+          "keyword": "pickup_zip",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "10001"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "aefd0943",
+      "displayName": "Same Zipcode Trip Summary",
+      "layout": [
+        {
+          "widget": {
+            "name": "total_fare",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8efbd95b",
+                  "fields": [
+                    {
+                      "name": "sum(total_amoint)",
+                      "expression": "SUM(`total_amoint`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Fare Amount"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_amoint)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "total_trips",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8efbd95b",
+                  "fields": [
+                    {
+                      "name": "sum(trip_count)",
+                      "expression": "SUM(`trip_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Trip Count"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(trip_count)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "top_zipcodes",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8efbd95b",
+                  "fields": [
+                    {
+                      "name": "pickup_zip",
+                      "expression": "`pickup_zip`"
+                    },
+                    {
+                      "name": "sum(total_amoint)",
+                      "expression": "SUM(`total_amoint`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Top 5 Zipcodes by Fare"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_zip",
+                  "displayName": "pickup_zip",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_amoint)",
+                  "displayName": "total_amoint",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "pickup_zip",
+                  "displayName": "pickup_zip",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "summary_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8efbd95b",
+                  "fields": [
+                    {
+                      "name": "pickup_zip",
+                      "expression": "`pickup_zip`"
+                    },
+                    {
+                      "name": "sum(total_amoint)",
+                      "expression": "SUM(`total_amoint`)"
+                    },
+                    {
+                      "name": "sum(trip_count)",
+                      "expression": "SUM(`trip_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Detailed Breakdown",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "pickup_zip",
+                    "actions": {
+                      "click": {
+                        "type": "link",
+                        "urlTemplate": "?selectedPageRefName=pages/7fac20aa&pickup_zip={{ @ }}"
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "sum(total_amoint)"
+                  },
+                  {
+                    "fieldName": "sum(trip_count)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "7fac20aa",
+      "displayName": "Detail Report",
+      "layout": [
+        {
+          "widget": {
+            "name": "total_trips_detail",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e816948b",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Trips"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_fare",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e816948b",
+                  "fields": [
+                    {
+                      "name": "avg(fare_amount)",
+                      "expression": "AVG(`fare_amount`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Average Fare"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(fare_amount)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "total_distance",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e816948b",
+                  "fields": [
+                    {
+                      "name": "sum(trip_distance)",
+                      "expression": "SUM(`trip_distance`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Distance"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(trip_distance)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_distance",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e816948b",
+                  "fields": [
+                    {
+                      "name": "avg(trip_distance)",
+                      "expression": "AVG(`trip_distance`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Average Distance"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(trip_distance)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 0,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "trip_details",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e816948b",
+                  "fields": [
+                    {
+                      "name": "tpep_pickup_datetime",
+                      "expression": "`tpep_pickup_datetime`"
+                    },
+                    {
+                      "name": "tpep_dropoff_datetime",
+                      "expression": "`tpep_dropoff_datetime`"
+                    },
+                    {
+                      "name": "trip_distance",
+                      "expression": "`trip_distance`"
+                    },
+                    {
+                      "name": "fare_amount",
+                      "expression": "`fare_amount`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Trip Details"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "tpep_pickup_datetime"
+                  },
+                  {
+                    "fieldName": "tpep_dropoff_datetime"
+                  },
+                  {
+                    "fieldName": "trip_distance"
+                  },
+                  {
+                    "fieldName": "fare_amount"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

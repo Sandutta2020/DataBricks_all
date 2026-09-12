@@ -1,6 +1,0 @@
-{"order_id":"ORD-001","Customer_id":"CUST001","order_count": 10,"order_amount":100.10}
-{"order_id":"ORD-002","Customer_id":"CUST001","order_count": 10,"order_amount":100}
-{"order_id":"ORD-003","Customer_id":"CUST002","order_count": 10,"order_amount":100.10}
-{"order_id":"ORD-004","Customer_id":"CUST002","order_count": 10,"order_amount":100}
-{"order_id":"ORD-005","Customer_id":"CUST003","order_count": 10,"order_amount":100.10}
-{"order_id":"ORD-005","Customer_id":"CUST004","order_count": 10,"order_amount":100.10}

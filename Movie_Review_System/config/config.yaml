@@ -1,0 +1,29 @@
+# Shared settings across all environments
+default: &default_settings
+  job_name: "Movie_Review_system"
+  tables:
+    control_tables: "Movie_Demo.Movie_Schema.Movie_job_control_table"
+    movie_rating_bronze : "Movie_Demo.Movie_Schema.movie_review_data_bronze"
+
+dev:
+  <<: *default_settings
+  env: "DEV"
+  catalog : "Movie_Demo"
+  schema : "Movie_Schema"
+  paths:
+    landing: "/Volumes/Movie_Demo/Movie_Schema/movie_vol/landing/"
+    processing: "/Volumes/Movie_Demo/Movie_Schema/movie_vol/processing/"
+    archived: "/Volumes/Movie_Demo/Movie_Schema/movie_vol/archived/"
+    logpath: "/Volumes/Movie_Demo/Movie_Schema/movie_vol/logDir/"
+  log_level: "DEBUG"
+prod:
+  <<: *default_settings
+  env: "PROD"
+  catalog : "adhoc_write_qastg_NNNNNNNNNN"
+  schema : "dna_de"
+  paths:
+    landing: "/Volumes/adhoc_write_qastg_NNNNNNNNNN/dna_de/lure_data_analysis/landing/"
+    processing: "/Volumes/adhoc_write_qastg_NNNNNNNNNN/dna_de/lure_data_analysis/processing/"
+    archived: "/Volumes/adhoc_write_qastg_NNNNNNNNNN/dna_de/lure_data_analysis/archived/"
+    logpath : "/Volumes/adhoc_write_qastg_NNNNNNNNNN/dna_de/lure_data_analysis/logDir/"
+  log_level: "INFO"

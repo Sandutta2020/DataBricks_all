@@ -26,8 +26,8 @@ def spark():
     yield spark
     # After the test, you can add cleanup code if needed.
 
-
-
+catalog_name =cfg.get('catalog')
+schema_name =cfg.get('schema')
 
 expected_tables_bkp = [
         "Movie_Demo.Movie_Schema.Movie_job_control_table",
@@ -66,4 +66,9 @@ def test_required_path_exists(spark):
     assert not missing,(
          f"missing directories :{', '.join(missing)}"
      )
+
+def test_catalog_schema_exists(spark):
+    assert spark.catalog.databaseExists(f"{catalog_name}.{schema_name}"),  (
+        f"Schema '{catalog_name}.{schema_name}' does not exist."
+    )
 

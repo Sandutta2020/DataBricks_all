@@ -39,9 +39,9 @@ app.main()
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC update adhoc_write_qastg.dna_de.Lure_orcl_control_table 
+# MAGIC update Movie_Demo.Movie_Schema.Movie_job_control_table
 # MAGIC set job_end_time = current_timestamp()
-# MAGIC where job_run_id = '534558086737862'
+# MAGIC where job_run_id = '2807971217842'
 
 # COMMAND ----------
 
@@ -71,3 +71,11 @@ list(cfg.get('tables', {}).values())
 # COMMAND ----------
 
 list(cfg.get('paths', {}).values())
+
+# COMMAND ----------
+
+cfg.get('catalog')
+
+# COMMAND ----------
+
+cfg.get('schema')

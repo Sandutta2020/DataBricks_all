@@ -1,0 +1,290 @@
+{
+  "datasets": [
+    {
+      "name": "60845306",
+      "displayName": "Summary sql",
+      "queryLines": [
+        "WITH q AS (\r\n",
+        "  SELECT\r\n",
+        "    COUNT(*) AS `Total Count`,\r\n",
+        "    COUNT(DISTINCT LMS_INSTALLATION_ID) AS `Distinct LMS Installation ID`,\r\n",
+        "    TOOL_PROVIDER AS `Tool Provider`\r\n",
+        "  FROM\r\n",
+        "    adhoc_write_qastg.dna_de.Lure_orcl_data_bronze\r\n",
+        "  WHERE\r\n",
+        "    TOOL_PROVIDER NOT IN ('Connect', 'Simnet')\r\n",
+        "  GROUP BY\r\n",
+        "    TOOL_PROVIDER\r\n",
+        "  ORDER BY\r\n",
+        "    COUNT(*) DESC\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "  `Tool Provider` `Tool Provider`,\r\n",
+        "  `Total Count` `Total Count`,\r\n",
+        "  `Distinct LMS Installation ID` `Distinct LMS Installation ID`\r\n",
+        "FROM\r\n",
+        "  q"
+      ],
+      "catalog": "adhoc_write_qastg",
+      "schema": "dna_de"
+    },
+    {
+      "name": "07c6daaf",
+      "displayName": "Detail sql",
+      "queryLines": [
+        "WITH `Detail_Report` AS (\n",
+        "  WITH q AS (\n",
+        "    SELECT\n",
+        "      LMS_INSTALLATION_ID,\n",
+        "      TOOL_PROVIDER,\n",
+        "      LMS_CONTEXT_TITLE\n",
+        "    FROM\n",
+        "      adhoc_write_qastg.dna_de.Lure_orcl_data_bronze\n",
+        "    WHERE\n",
+        "      (TOOL_PROVIDER = :param1)\n",
+        "  )\n",
+        "  SELECT\n",
+        "    `LMS_INSTALLATION_ID` `LMS_INSTALLATION_ID`,\n",
+        "    `TOOL_PROVIDER` `TOOL_PROVIDER`,\n",
+        "    `LMS_CONTEXT_TITLE` `LMS_CONTEXT_TITLE`\n",
+        "  FROM\n",
+        "    q\n",
+        ")\n",
+        "SELECT\n",
+        "  `Detail_Report`.`LMS_INSTALLATION_ID` `Detail_Report__LMS_INSTALLATION_ID`,\n",
+        "  `Detail_Report`.`TOOL_PROVIDER` `Detail_Report__TOOL_PROVIDER`,\n",
+        "  `Detail_Report`.`LMS_CONTEXT_TITLE` `Detail_Report__LMS_CONTEXT_TITLE`\n",
+        "FROM\n",
+        "  `Detail_Report`"
+      ],
+      "parameters": [
+        {
+          "displayName": "Tool Provider",
+          "keyword": "param1",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Goldy"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "catalog": "adhoc_write_qastg",
+      "schema": "dna_de"
+    }
+  ],
+  "relationshipGraphs": [
+    {
+      "sources": [
+        {
+          "name": "Summary_sql",
+          "datasetName": "60845306"
+        },
+        {
+          "name": "Detail_sql",
+          "datasetName": "07c6daaf"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "56985dc3",
+      "displayName": "Summary Page",
+      "layout": [
+        {
+          "widget": {
+            "name": "15a26ae7",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Summary_sql__Tool Provider",
+                      "expression": "`Summary_sql`.`Tool Provider`"
+                    },
+                    {
+                      "name": "Summary_sql__Total Count",
+                      "expression": "`Summary_sql`.`Total Count`"
+                    },
+                    {
+                      "name": "Summary_sql__Distinct LMS Installation ID",
+                      "expression": "`Summary_sql`.`Distinct LMS Installation ID`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "`Summary_sql`.`Total Count`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Summary_sql__Tool Provider",
+                    "actions": {
+                      "click": {
+                        "type": "link",
+                        "urlTemplate": "/sql/dashboardsv3/01f1a07fd1c61038a61d6379348a53d0/pages/98751a16?param1={{@}}",
+                        "openInNewTab": true
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "Summary_sql__Total Count"
+                  },
+                  {
+                    "fieldName": "Summary_sql__Distinct LMS Installation ID"
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 1
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 10,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "59e1b4c1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Detail_sql__Detail_Report__LMS_INSTALLATION_ID",
+                      "expression": "`Detail_sql`.`Detail_Report__LMS_INSTALLATION_ID`"
+                    },
+                    {
+                      "name": "Detail_sql__Detail_Report__TOOL_PROVIDER",
+                      "expression": "`Detail_sql`.`Detail_Report__TOOL_PROVIDER`"
+                    },
+                    {
+                      "name": "Detail_sql__Detail_Report__LMS_CONTEXT_TITLE",
+                      "expression": "`Detail_sql`.`Detail_Report__LMS_CONTEXT_TITLE`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Detail_sql__Detail_Report__LMS_INSTALLATION_ID"
+                  },
+                  {
+                    "fieldName": "Detail_sql__Detail_Report__TOOL_PROVIDER"
+                  },
+                  {
+                    "fieldName": "Detail_sql__Detail_Report__LMS_CONTEXT_TITLE"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "8c12a6c0",
+      "displayName": "Global Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "3564b6d2",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1a07fd1c61038a61d6379348a53d0/datasets/01f1a080c7a6190bb5ffd7d8cfeac9e1_param1",
+                "query": {
+                  "datasetName": "07c6daaf",
+                  "parameters": [
+                    {
+                      "name": "param1",
+                      "keyword": "param1"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param1",
+                    "queryName": "parameter_dashboards/01f1a07fd1c61038a61d6379348a53d0/datasets/01f1a080c7a6190bb5ffd7d8cfeac9e1_param1"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

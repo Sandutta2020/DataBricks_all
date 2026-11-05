@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC
 # MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
@@ -102,11 +106,13 @@ print(f"User DB Location:  {DA.paths.datasets}")
 # COMMAND ----------
 
 from pyspark.sql.functions import col
+import pyspark.sql.functions as F
 
 # Load dataset with spark
 shared_volume_name = 'telco' # From Marketplace
 csv_name = 'telco-customer-churn-missing' # CSV file name
-dataset_p_telco = f"{DA.paths.datasets.telco}/{shared_volume_name}/{csv_name}.csv" # Full path
+#dataset_p_telco = f"{DA.paths.datasets.telco}/{shared_volume_name}/{csv_name}.csv" # Full path
+dataset_p_telco="/Volumes/databricks_telco_customer_dataset/v01/telco/telco-customer-churn-missing.csv"
 
 # features to use
 primary_key = "customerID"
@@ -177,7 +183,7 @@ Y_train_pdf = response_df.drop(primary_key).toPandas()
 clf = DecisionTreeClassifier(max_depth=3, random_state=42)
 
 # Use 3-level namespace for model name
-model_name = f"{DA.catalog_name}.{DA.schema_name}.ml_model" 
+model_name = "dbx_catalog.dbx_schema.ml_model"
 
 with mlflow.start_run(run_name="Model-Batch-Deployment-Demo") as mlflow_run:
 
@@ -187,7 +193,6 @@ with mlflow.start_run(run_name="Model-Batch-Deployment-Demo") as mlflow_run:
         log_models=False,
         log_post_training_metrics=True,
         silent=True)
-    
     clf.fit(X_train_pdf, Y_train_pdf)
 
     # Log model and push to registry
@@ -280,7 +285,7 @@ features_df_all = telco_df.select(primary_key, *features)
 
 # feature table definition
 fe = FeatureEngineeringClient()
-feature_table_name = f"{DA.catalog_name}.{DA.schema_name}.features"
+feature_table_name = "dbx_catalog.dbx_schema.features"
 
 #drop table if exists
 try:
@@ -336,8 +341,6 @@ training_df = training_set_spec.load_df()
 
 import warnings
 from mlflow.types.utils import _infer_schema
-    
-    
 # Convert data to pandas dataframes
 X_train_pdf2 = training_df.drop(primary_key, response).toPandas()
 Y_train_pdf2 = training_df.select(response).toPandas()

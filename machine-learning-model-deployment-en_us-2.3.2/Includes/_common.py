@@ -65,7 +65,7 @@ class DBAcademyHelper(NestedNamespace):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.workspace = WorkspaceClient()
-
+        """
         try:
             default_catalog = self.workspace.settings.default_namespace.get().namespace.value
         except:
@@ -93,13 +93,12 @@ class DBAcademyHelper(NestedNamespace):
                 catalog = row['value']
             elif row['key'] == 'schema_name':
                 schema = row['value']
-
         # set default catalog and schema according to metadata
         if catalog:
-            spark.sql(f'USE CATALOG {catalog}')
+        """
+        spark.sql('USE CATALOG dbx_catalog')
+        spark.sql('USE SCHEMA dbx_catalog.dbx_schema')
 
-            if schema:
-                spark.sql(f'USE SCHEMA {schema}')
 
     # add an initializer. Initializers can be chained are are all called when DA.init() is called.
     # This pattern makes it easier to dynamically augment the class across cells or notebooks.

@@ -34,14 +34,35 @@ app.main()
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC select * from Movie_Demo.Movie_Schema.Movie_job_control_table
+# MAGIC select * from Movie_Demo.Movie_Schema.Movie_job_control_table order by id desc
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC update Movie_Demo.Movie_Schema.Movie_job_control_table
+# MAGIC set job_end_time = current_timestamp(),
+# MAGIC job_status = 'COMPLETED'
+# MAGIC where job_run_id = '76932423317225'
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC update Movie_Demo.Movie_Schema.Movie_job_control_table
 # MAGIC set job_end_time = current_timestamp()
-# MAGIC where job_run_id = '2807971217842'
+# MAGIC where job_run_id = '585418753180817'
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from Movie_Demo.Movie_Schema.movie_review_data_bronze
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC ALTER TABLE Movie_Demo.Movie_Schema.movie_review_data_bronze SET TBLPROPERTIES ('delta.columnMapping.mode' = 'name');
+# MAGIC ALTER TABLE Movie_Demo.Movie_Schema.movie_review_data_bronze 
+# MAGIC RENAME COLUMN Review_ym TO ReviewYM;
 
 # COMMAND ----------
 

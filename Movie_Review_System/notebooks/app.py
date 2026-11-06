@@ -60,8 +60,8 @@ def main(run_id):
         # -------------------------------------------------------
         # Ingesting the loading and cleaning data
         # ------------------------------------------------------- 
-        lure_table_name = cfg.get('tables',{}).get('lure_bronze')
-        logger.info("<<< Writing Data to Bronze Table >>>>")
+        lure_table_name = cfg.get('tables',{}).get('movie_rating_bronze')
+        logger.info("<<< Writing Data to Bronze Table >>>> ---{lure_table_name}")
         job.write_to_bronze(lure_oracle_df,lure_table_name)
         logger.info("<<< Writing Data to Bronze Table Ended >>>>")
         # -------------------------------------------------------
